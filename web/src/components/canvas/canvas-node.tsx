@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
+import { Box, ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
 
+import { CanvasModel3dViewer } from "@/components/canvas/canvas-model3d-viewer";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -53,6 +54,7 @@ type CanvasNodeProps = {
     onDeleteBatchImage?: (nodeId: string, imageId: string) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData, imageId?: string) => void;
+    onViewModel3d?: (node: CanvasNodeData) => void;
     onSelectReference?: (nodeId: string) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -117,6 +119,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onDeleteBatchImage,
     onRetry,
     onViewImage,
+    onViewModel3d,
     onSelectReference,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -131,6 +134,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
+    const hasModel3dContent = data.type === CanvasNodeType.Model3d && Boolean(data.metadata?.content);
     const isGroup = data.type === CanvasNodeType.Group;
     const batchCount = data.type === CanvasNodeType.Image ? data.metadata?.images?.length || 0 : data.type === CanvasNodeType.Text ? data.metadata?.texts?.length || 0 : 0;
     const isBatchRoot = batchCount > 1;
@@ -384,6 +388,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onViewImage?.(data);
                         return;
                     }
+                    // A 3D node is small on the canvas and its orbit controls need room, so a double-click
+                    // opens the model in a large viewer, mirroring how an image node opens its preview.
+                    if (data.type === CanvasNodeType.Model3d && hasModel3dContent) {
+                        event.stopPropagation();
+                        onViewModel3d?.(data);
+                        return;
+                    }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
@@ -472,6 +483,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
+    [CanvasNodeType.Model3d]: Model3dNodeContent,
     [CanvasNodeType.Group]: GroupNodeContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
@@ -704,6 +716,18 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
             </div>
         );
     return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-video={node.id} data-canvas-no-zoom />;
+}
+
+function Model3dNodeContent({ node, theme }: NodeContentRendererProps) {
+    const { t } = useTranslation();
+    if (!node.metadata?.content)
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
+                <Box className="size-7 opacity-35" />
+                <span className="text-sm">{t(node.metadata?.status === "loading" ? "canvas.model3d.generating" : "canvas.model3d.empty")}</span>
+            </div>
+        );
+    return <CanvasModel3dViewer src={node.metadata.content} poster={node.metadata.model3dPreview} theme={theme} interactive={Boolean(node.metadata.interactive)} />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

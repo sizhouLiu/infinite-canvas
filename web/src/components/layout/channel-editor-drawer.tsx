@@ -3,7 +3,7 @@ import { ListPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, TRIPO_BASE_URL_CN, TRIPO_BASE_URL_GLOBAL, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -17,8 +17,14 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
+        { label: "Tripo", value: "tripo" },
     ];
-    const capabilityOptions: Array<{ label: string; value: ModelCapability }> = ["image", "video", "text", "audio"].map((value) => ({ label: t(`config.channelEditor.capabilities.${value}`), value: value as ModelCapability }));
+    const capabilityOptions: Array<{ label: string; value: ModelCapability }> = ["image", "video", "text", "audio", "model3d"].map((value) => ({ label: t(`config.channelEditor.capabilities.${value}`), value: value as ModelCapability }));
+    // Tripo runs two independent regions; accounts and API keys are not shared between them.
+    const tripoRegionOptions = [
+        { label: t("config.channelEditor.tripoRegions.cn"), value: TRIPO_BASE_URL_CN },
+        { label: t("config.channelEditor.tripoRegions.global"), value: TRIPO_BASE_URL_GLOBAL },
+    ];
 
     useEffect(() => {
         if (open && channel) setDraft(channel);
@@ -33,6 +39,8 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         const baseUrl = !draft.baseUrl.trim() || draft.baseUrl.trim() === defaultBaseUrlForApiFormat(draft.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : draft.baseUrl;
         patch({ apiFormat, baseUrl });
     };
+
+    const tripoRegion = tripoRegionOptions.find((option) => draft.baseUrl.trim().replace(/\/+$/, "") === option.value)?.value;
 
     const applySelection = (names: string[]) => {
         const map = new Map(draft.models.map((model) => [model.name, model]));
@@ -73,6 +81,13 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                     <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.protocol")}</span>
                     <Select className="w-full" value={draft.apiFormat} options={apiFormatOptions} onChange={changeApiFormat} />
                 </label>
+                {draft.apiFormat === "tripo" ? (
+                    <label className="block md:col-span-2">
+                        <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.tripoRegion")}</span>
+                        <Segmented block value={tripoRegion} options={tripoRegionOptions} onChange={(value) => patch({ baseUrl: String(value) })} />
+                        <span className="mt-1 block text-xs text-stone-500">{t("config.channelEditor.tripoRegionHint")}</span>
+                    </label>
+                ) : null}
                 <label className="block md:col-span-2">
                     <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.baseUrl")}</span>
                     <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.example.com" />

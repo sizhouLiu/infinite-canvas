@@ -146,20 +146,21 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
 }
 
 /** 创建触发节点生成的画布操作。 */
-function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "audio", prompt?: string) {
+function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "audio" | "model3d", prompt?: string) {
     return { type: "run_generation", nodeId, mode, prompt };
 }
 
 /** 将未知生成模式归一为画布支持的模式。 */
-function generationMode(value: unknown): "text" | "image" | "video" | "audio" {
-    return value === "text" || value === "video" || value === "audio" ? value : "image";
+function generationMode(value: unknown): "text" | "image" | "video" | "audio" | "model3d" {
+    return value === "text" || value === "video" || value === "audio" || value === "model3d" ? value : "image";
 }
 
 /** 获取生成模式对应的默认节点标题。 */
-function generationTitle(mode: "text" | "image" | "video" | "audio") {
+function generationTitle(mode: "text" | "image" | "video" | "audio" | "model3d") {
     if (mode === "text") return "文本生成";
     if (mode === "video") return "视频生成";
     if (mode === "audio") return "音频生成";
+    if (mode === "model3d") return "3D 生成";
     return "图片生成";
 }
 

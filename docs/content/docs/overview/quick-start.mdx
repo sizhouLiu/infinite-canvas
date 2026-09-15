@@ -36,3 +36,5 @@ docker run --rm -p 3000:3000 infinite-canvas
 - Configure WebDAV if you want to synchronize canvases, assets, and generation history across devices.
 
 Canvas projects and My Assets are primarily stored in the browser. The API key is also stored locally and used by the browser to call OpenAI-compatible endpoints directly.
+
+Tripo generation (both 3D and image) requires the local proxy: Tripo's `/v3` endpoints send no CORS headers, so the browser cannot call them directly. Note that the proxy only solves cross-origin access; it does not hide the key. Tripo recommends keeping the API key out of the frontend and proxying through your own backend, but this project is frontend-only with no backend, so the key stays in browser storage and is sent through the local proxy with each request. Tripo bills credits per generation (measured: 10–30 credits per text-to-3D run), so weigh that trade-off and only enter the key on a device you trust. The same applies to each Tripo region: China and global are separate accounts, so a key you enter for one is stored and sent independently of the other.

@@ -5,8 +5,8 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 
-export type ApiCallFormat = "openai" | "gemini";
-export type ModelCapability = "image" | "video" | "text" | "audio";
+export type ApiCallFormat = "openai" | "gemini" | "tripo";
+export type ModelCapability = "image" | "video" | "text" | "audio" | "model3d";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
 
 export type ChannelModel = {
@@ -35,10 +35,16 @@ export type AiConfig = {
     videoModel: string;
     textModel: string;
     audioModel: string;
+    model3dModel: string;
     audioVoice: string;
     audioFormat: string;
     audioSpeed: string;
     audioInstructions: string;
+    model3dTexture: string;
+    model3dPbr: string;
+    model3dTextureQuality: string;
+    model3dFaceLimit: string;
+    model3dQuad: string;
     videoSeconds: string;
     vquality: string;
     videoGenerateAudio: string;
@@ -74,6 +80,9 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+export const TRIPO_BASE_URL_CN = "https://openapi.tripo3d.com";
+export const TRIPO_BASE_URL_GLOBAL = "https://openapi.tripo3d.ai";
+const TRIPO_BASE_URL = TRIPO_BASE_URL_CN;
 export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
 export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
@@ -96,16 +105,45 @@ export const defaultConfig: AiConfig = {
                 { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
         },
+        // Tripo runs two independent regions with separate accounts, so each gets its own channel and API key.
+        {
+            id: "tripo-cn",
+            name: i18n.t("config.channels.tripoCnName"),
+            baseUrl: TRIPO_BASE_URL_CN,
+            apiKey: "",
+            apiFormat: "tripo",
+            models: [
+                { name: "v3.1-20260211", capability: "model3d" },
+                { name: "seedream_v5", capability: "image" },
+            ],
+        },
+        {
+            id: "tripo-global",
+            name: i18n.t("config.channels.tripoGlobalName"),
+            baseUrl: TRIPO_BASE_URL_GLOBAL,
+            apiKey: "",
+            apiFormat: "tripo",
+            models: [
+                { name: "v3.1-20260211", capability: "model3d" },
+                { name: "seedream_v5", capability: "image" },
+            ],
+        },
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
+    model3dModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
     audioInstructions: "",
+    model3dTexture: "true",
+    model3dPbr: "true",
+    model3dTextureQuality: "standard",
+    model3dFaceLimit: "",
+    model3dQuad: "false",
     videoSeconds: "6",
     vquality: "720",
     videoGenerateAudio: "true",
@@ -153,10 +191,19 @@ export function boolConfig(value: string, fallback: boolean) {
 }
 const AUDIO_KEYWORDS = ["audio", "tts", "speech", "voice", "music", "sound"];
 const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "imagen", "flux", "sdxl", "stable-diffusion", "midjourney"];
+const MODEL3D_KEYWORDS = ["tripo", "3d"];
+// Tripo's model names carry no capability hint the generic keyword lists would catch, so both of its
+// families are matched first: image names by prefix, 3D names by their "<version>-<date>" shape
+// (v3.1-20260211, P2-20260801), which would otherwise fall through to text.
+const TRIPO_IMAGE_MODEL_KEYWORDS = ["seedream", "banana", "chat_image"];
+const TRIPO_MODEL3D_PATTERN = /^(?:v\d+(?:\.\d+)?|[a-z]\d+)-\d{8}$/i;
 
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
     const value = name.toLowerCase();
+    if (TRIPO_IMAGE_MODEL_KEYWORDS.some((keyword) => value.includes(keyword))) return "image";
+    if (TRIPO_MODEL3D_PATTERN.test(value)) return "model3d";
+    if (MODEL3D_KEYWORDS.some((keyword) => value.includes(keyword))) return "model3d";
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
     if (IMAGE_KEYWORDS.some((keyword) => value.includes(keyword))) return "image";
@@ -181,8 +228,8 @@ export function modelMatchesCapability(config: AiConfig, value: string, capabili
 }
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
-    const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
-    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
+    const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : capability === "model3d" ? config.model3dModel : config.textModel;
+    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : capability === "model3d" ? defaultConfig.model3dModel : defaultConfig.textModel;
     if (currentModel && modelMatchesCapability(config, currentModel, capability)) return currentModel;
     if (defaultModel && modelMatchesCapability(config, defaultModel, capability)) return defaultModel;
     return fallbackModel;
@@ -260,10 +307,16 @@ export const useConfigStore = create<ConfigStore>()(
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
+                        model3dModel: normalizeModelOptionValue(config.model3dModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",
+                        model3dTexture: config.model3dTexture || defaultConfig.model3dTexture,
+                        model3dPbr: config.model3dPbr || defaultConfig.model3dPbr,
+                        model3dTextureQuality: config.model3dTextureQuality || defaultConfig.model3dTextureQuality,
+                        model3dFaceLimit: config.model3dFaceLimit || "",
+                        model3dQuad: config.model3dQuad || defaultConfig.model3dQuad,
                         reasoningEffort: config.reasoningEffort || "auto",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
@@ -453,7 +506,7 @@ function normalizeChannels(config: AiConfig) {
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel].map(modelOptionName)),
+                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel, config.model3dModel].map(modelOptionName)),
             }),
         );
     }
@@ -462,11 +515,12 @@ function normalizeChannels(config: AiConfig) {
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return GEMINI_BASE_URL;
+    if (apiFormat === "tripo") return TRIPO_BASE_URL;
     return OPENAI_BASE_URL;
 }
 
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
-    return apiFormat === "gemini" ? apiFormat : "openai";
+    return apiFormat === "gemini" || apiFormat === "tripo" ? apiFormat : "openai";
 }
 
 function uniqueModelOptions(models: string[]) {

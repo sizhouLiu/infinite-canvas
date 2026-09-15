@@ -60,9 +60,15 @@ export async function cleanupUnusedMedia(usedData: unknown) {
     await Promise.all(unused.map((key) => store.removeItem(key)));
 }
 
+// Node metadata that points at a second blob (the 3D preview image) must be listed here, or the sweep deletes it.
+const MEDIA_KEY_FIELDS = ["storageKey", "model3dPreviewKey", "model3dConvertedKey"] as const;
+
 export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
-    if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.includes(":")) keys.add(value.storageKey);
+    MEDIA_KEY_FIELDS.forEach((field) => {
+        const key = (value as Record<string, unknown>)[field];
+        if (typeof key === "string" && key.includes(":")) keys.add(key);
+    });
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectMediaStorageKeys(child, keys)) : collectMediaStorageKeys(item, keys)));
     return keys;
 }

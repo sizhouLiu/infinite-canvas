@@ -1,3 +1,5 @@
+import type { Model3dTaskKind, MultiviewView } from "@/services/api/model3d-ops";
+
 export type Position = {
     x: number;
     y: number;
@@ -15,6 +17,7 @@ export enum CanvasNodeType {
     Config = "config",
     Video = "video",
     Audio = "audio",
+    Model3d = "model3d",
     Group = "group",
 }
 
@@ -22,7 +25,7 @@ export enum CanvasNodeType {
 export type CanvasNodeTypeId = CanvasNodeType | (string & {});
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
-export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
+export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "model3d";
 export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CanvasNodeImage = {
@@ -83,6 +86,28 @@ export type CanvasNodeMetadata = {
     durationMs?: number;
     videoTaskId?: string;
     videoTaskProvider?: "openai" | "gemini";
+    model3dTaskId?: string;
+    model3dPreview?: string;
+    model3dPreviewKey?: string;
+    model3dTexture?: string;
+    model3dPbr?: string;
+    model3dTextureQuality?: string;
+    model3dFaceLimit?: string;
+    model3dQuad?: string;
+    // Tripo task that produced this model. Kept so follow-up operations can chain server-side instead of
+    // re-uploading the glb; model3dTaskId is cleared on success, so the id is stored separately here.
+    model3dSourceTaskId?: string;
+    model3dTaskKind?: Model3dTaskKind;
+    // Rig type this model was rigged with; the retarget animation list depends on it.
+    model3dRigType?: string;
+    // Format conversion output, stored on the source node rather than as a new node (it cannot be previewed).
+    model3dConvertedKey?: string;
+    model3dConvertedFormat?: string;
+    model3dConvertedMime?: string;
+    model3dConvertTaskId?: string;
+    // Which multiview angle an image node holds, and the task that produced the set.
+    multiviewView?: MultiviewView;
+    multiviewTaskId?: string;
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };

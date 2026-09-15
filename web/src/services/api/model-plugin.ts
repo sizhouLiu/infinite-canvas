@@ -970,6 +970,65 @@ return await generateText({
 });`,
         },
     ],
+    model3d: [
+        {
+            label: i18n.t("modelPlugin.templates.tripo"),
+            script: `/**
+ * Tripo 3D: POST /v3/generation/text-to-model, then poll GET /v3/tasks/{id}.
+ * Returns the glb URL; the app downloads and stores it.
+ * @param {string} prompt
+ * @param {object} params
+ * @param {string} model
+ * @param {string} baseUrl
+ * @param {string} apiKey
+ * @param {function} request
+ * @param {function} poll
+ * @returns {Promise<{url: string}>}
+ */
+async function generateModel3d({ prompt, params, model, baseUrl, apiKey, request, poll }) {
+  const created = await request({
+    method: "post",
+    url: \`\${baseUrl}/v3/generation/text-to-model\`,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: \`Bearer \${apiKey}\`,
+    },
+    data: {
+      model: model,
+      prompt: prompt,
+      texture: true,
+      pbr: true,
+    },
+  });
+  if (created.code !== 0) throw new Error(created.message || "create task failed");
+  const taskId = created.data.task_id;
+  return await poll(
+    () =>
+      request({
+        url: \`\${baseUrl}/v3/tasks/\${taskId}\`,
+        headers: { Authorization: \`Bearer \${apiKey}\` },
+      }),
+    (response) => {
+      const task = response.data || {};
+      if (task.status === "success") return { url: task.output.model_url };
+      if (["failed", "banned", "cancelled", "expired"].includes(task.status)) throw new Error(task.error_message || task.status);
+      return null;
+    },
+    { intervalMs: 5000, timeoutMs: 600000 },
+  );
+}
+
+return await generateModel3d({
+  prompt,
+  params,
+  model,
+  baseUrl,
+  apiKey,
+  request,
+  poll,
+});`,
+        },
+    ],
     };
 }
 

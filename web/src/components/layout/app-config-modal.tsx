@@ -18,7 +18,7 @@ import { createModelChannel, modelOptionsFromChannels, normalizeModelOptionValue
 
 type ModelGroup = {
     capability: ModelCapability;
-    modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel";
+    modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel" | "model3dModel";
     labelKey: string;
 };
 
@@ -34,6 +34,7 @@ const modelGroups: ModelGroup[] = [
     { capability: "video", modelKey: "videoModel", labelKey: "config.preferences.defaultVideoModel" },
     { capability: "text", modelKey: "textModel", labelKey: "config.preferences.defaultTextModel" },
     { capability: "audio", modelKey: "audioModel", labelKey: "config.preferences.defaultAudioModel" },
+    { capability: "model3d", modelKey: "model3dModel", labelKey: "config.preferences.defaultModel3dModel" },
 ];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
@@ -392,6 +393,7 @@ function normalizeImageCount(value: string) {
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
+    if (apiFormat === "tripo") return "Tripo";
     return "OpenAI";
 }
 

@@ -11,6 +11,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
+import { CanvasModel3dSettingsPopover, type CanvasModel3dSettingKey } from "./canvas-model3d-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
@@ -45,6 +46,9 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
+    // Image-to-3D and multiview-to-3D take the upstream images alone, so 3D generation does not need a prompt
+    // once an image is connected — the request drops it anyway. Every other mode still requires one.
+    const promptOptional = mode === "model3d" && mentionReferences.some((reference) => reference.kind === "image");
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
 
@@ -62,7 +66,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning) return;
+        if ((!text && !promptOptional) || isRunning) return;
         onGenerate(node.id, mode, text);
     };
 
@@ -87,7 +91,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                 onSubmit={submit}
                 className="thin-scrollbar h-40 w-full cursor-text resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: "transparent", color: theme.node.text }}
-                placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : promptOptional ? "model3dFromImage" : mode}`)}
             />
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
@@ -118,6 +122,11 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
+                    ) : mode === "model3d" ? (
+                        <>
+                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="model3d" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
+                            <CanvasModel3dSettingsPopover config={config} buttonClassName="!h-10 !max-w-[190px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, model3dConfigPatch(key, value))} />
+                        </>
                     ) : (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
@@ -129,7 +138,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
+                    disabled={!isRunning && !prompt.trim() && !promptOptional}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={t(isRunning ? "canvas.promptPanel.stopGeneration" : "canvas.promptPanel.generate")}
                 >
@@ -155,7 +164,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         onChange={updatePrompt}
                         className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-[15px] leading-6 outline-none"
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
-                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : promptOptional ? "model3dFromImage" : mode}`)}
                     />
                 </div>
             </Modal>
@@ -164,7 +173,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
-    return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
+    return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : type === CanvasNodeType.Model3d ? "model3d" : "image";
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
@@ -184,6 +193,11 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
+        model3dTexture: node.metadata?.model3dTexture || globalConfig.model3dTexture || defaultConfig.model3dTexture,
+        model3dPbr: node.metadata?.model3dPbr || globalConfig.model3dPbr || defaultConfig.model3dPbr,
+        model3dTextureQuality: node.metadata?.model3dTextureQuality || globalConfig.model3dTextureQuality || defaultConfig.model3dTextureQuality,
+        model3dFaceLimit: node.metadata?.model3dFaceLimit ?? globalConfig.model3dFaceLimit ?? defaultConfig.model3dFaceLimit,
+        model3dQuad: node.metadata?.model3dQuad || globalConfig.model3dQuad || defaultConfig.model3dQuad,
         count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
     };
 }
@@ -193,6 +207,10 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     if (key === "videoGenerateAudio") return { generateAudio: value };
     if (key === "videoWatermark") return { watermark: value };
     if (key === "videoMode") return { videoMode: value };
+    return { [key]: value };
+}
+
+function model3dConfigPatch(key: CanvasModel3dSettingKey, value: string) {
     return { [key]: value };
 }
 

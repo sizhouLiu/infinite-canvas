@@ -32,6 +32,18 @@ export function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
     return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
 }
 
+export function model3dMetadata(model: UploadedFile, preview?: UploadedFile | null): CanvasNodeMetadata {
+    return {
+        content: model.url,
+        storageKey: model.storageKey,
+        status: "success",
+        bytes: model.bytes,
+        mimeType: model.mimeType || "model/gltf-binary",
+        model3dTaskId: undefined,
+        ...(preview ? { model3dPreview: preview.url, model3dPreviewKey: preview.storageKey } : {}),
+    };
+}
+
 export function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
     return { content: audio.url, storageKey: audio.storageKey, status: "success", bytes: audio.bytes, mimeType: audio.mimeType || "audio/mpeg", durationMs: audio.durationMs };
 }
@@ -59,6 +71,17 @@ export function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetada
         audioFormat: config.audioFormat,
         audioSpeed: config.audioSpeed,
         audioInstructions: config.audioInstructions,
+    };
+}
+
+export function buildModel3dGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
+    return {
+        model: config.model,
+        model3dTexture: config.model3dTexture,
+        model3dPbr: config.model3dPbr,
+        model3dTextureQuality: config.model3dTextureQuality,
+        model3dFaceLimit: config.model3dFaceLimit,
+        model3dQuad: config.model3dQuad,
     };
 }
 

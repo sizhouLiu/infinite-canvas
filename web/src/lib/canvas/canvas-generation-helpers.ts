@@ -2,6 +2,7 @@ import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/store
 import i18n from "@/i18n";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
+import { MULTIVIEW_VIEWS, type MultiviewView } from "@/services/api/model3d-ops";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
@@ -48,6 +49,17 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
             const metadata = node.metadata;
             const content = metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
+            // Tripo's signed URLs expire, so the 3D node reads both the model and its preview back from local storage.
+            if (node.type === CanvasNodeType.Model3d && metadata?.storageKey) {
+                return {
+                    ...node,
+                    metadata: {
+                        ...metadata,
+                        content: await resolveMediaUrl(metadata.storageKey, content),
+                        ...(metadata.model3dPreviewKey ? { model3dPreview: await resolveMediaUrl(metadata.model3dPreviewKey, metadata.model3dPreview) } : {}),
+                    },
+                };
+            }
             if (node.type !== CanvasNodeType.Image || !metadata || !content) return node;
             const images = await Promise.all((metadata.images || []).map(async (image) => (image.content ? { ...image, content: await resolveImageUrl(image.storageKey, image.content) } : image)));
             if (metadata.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content), images } };
@@ -110,6 +122,11 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
+        model3dTexture: node?.metadata?.model3dTexture || config.model3dTexture || defaultConfig.model3dTexture,
+        model3dPbr: node?.metadata?.model3dPbr || config.model3dPbr || defaultConfig.model3dPbr,
+        model3dTextureQuality: node?.metadata?.model3dTextureQuality || config.model3dTextureQuality || defaultConfig.model3dTextureQuality,
+        model3dFaceLimit: node?.metadata?.model3dFaceLimit ?? config.model3dFaceLimit ?? defaultConfig.model3dFaceLimit,
+        model3dQuad: node?.metadata?.model3dQuad || config.model3dQuad || defaultConfig.model3dQuad,
         count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
 }
@@ -118,10 +135,30 @@ export function hasResumableVideoTask(node: CanvasNodeData) {
     return node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId) && !node.metadata?.content;
 }
 
+export function hasResumableModel3dTask(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Model3d && Boolean(node.metadata?.model3dTaskId) && !node.metadata?.content;
+}
+
+/**
+ * A format conversion runs on a node that already holds a model, so it cannot reuse the resumable check
+ * above (which requires an empty node). Conversions are billed, so a refresh mid-conversion resumes too.
+ */
+export function hasResumableModel3dConvertTask(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Model3d && Boolean(node.metadata?.model3dConvertTaskId) && !node.metadata?.model3dConvertedKey;
+}
+
+/**
+ * Which multiview angle an upstream image feeds. An image produced by image-to-multiview carries its own
+ * view; anything else falls back to connection order, so the first image becomes the required front view.
+ */
+export function multiviewViewForReference(image: ReferenceImage, nodes: CanvasNodeData[], index: number): MultiviewView {
+    return nodes.find((node) => node.id === image.id)?.metadata?.multiviewView || MULTIVIEW_VIEWS[index] || "right";
+}
+
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
         node.metadata?.status === "loading"
-            ? hasResumableVideoTask(node)
+            ? hasResumableVideoTask(node) || hasResumableModel3dTask(node)
                 ? node
                 : {
                       ...node,
