@@ -5,6 +5,7 @@ import { Group, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
+import i18n from "@/i18n";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createModel3dTask, isModel3dTaskFailed, model3dRequestOptions, storeGeneratedModel3d, storeModel3dPreview, uploadModel3dImage, waitForModel3dTask, type Model3dResult } from "@/services/api/model3d";
@@ -46,8 +47,10 @@ import { captureVideoFrame, type VideoFramePosition } from "@/lib/canvas/canvas-
 import { App, Button, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { ActiveConnectionPath, ConnectionPath } from "@/components/canvas/canvas-connections";
+import { CanvasMultiviewViewMenu, type MultiviewViewMenuState } from "@/components/canvas/canvas-multiview-view-menu";
 import { CanvasConfigComposer } from "@/components/canvas/canvas-config-composer";
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
+import { CanvasNodeParameterRows } from "@/components/canvas/canvas-node-parameter-rows";
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
@@ -71,7 +74,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useGenerationHistoryStore, type GenerationHistoryInput } from "@/stores/canvas/use-generation-history-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
-import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { buildNodeMentionReferences, getGroupResourceNodes, getParameterSourceNode, isCanvasReferenceNode, isConfigParameterSource, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { BUILTIN_MULTIVIEW_VIEWS, multiviewDelay, multiviewPrompt, retryAfterSeconds } from "@/lib/canvas/canvas-multiview-prompts";
 import { splitModel3dParts } from "@/lib/canvas/canvas-model3d-parts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
@@ -84,6 +87,8 @@ import {
     buildAnglePrompt,
     buildGenerationConfig,
     findRetrySourceNode,
+    pickParameterMetadata,
+    resolveMultiviewAssignment,
     generationReferenceUrls,
     getGenerationCount,
     getInputSummary,
@@ -185,6 +190,11 @@ export default function CanvasPage() {
     return <InfiniteCanvasPage />;
 }
 
+/** Shapes an upstream config node into the prompt panel's parameter-source prop. */
+function parameterSourceForNode(source: CanvasNodeData | undefined) {
+    return source ? { nodeId: source.id, title: source.title || i18n.t("canvas.configNode.title"), parameters: pickParameterMetadata(source.metadata) } : undefined;
+}
+
 function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
     const { t } = useTranslation();
@@ -273,7 +283,6 @@ function InfiniteCanvasPage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
-    const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [pluginManagerOpen, setPluginManagerOpen] = useState(false);
@@ -296,6 +305,7 @@ function InfiniteCanvasPage() {
     const [isNodeResizing, setIsNodeResizing] = useState(false);
     const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null);
     const [referencePickerNodeId, setReferencePickerNodeId] = useState<string | null>(null);
+    const [multiviewViewMenu, setMultiviewViewMenu] = useState<MultiviewViewMenuState | null>(null);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -310,6 +320,19 @@ function InfiniteCanvasPage() {
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const videoPollIdsRef = useRef(new Set<string>());
     const model3dPollIdsRef = useRef(new Set<string>());
+
+    /**
+     * The config a node generates with, including any upstream parameter node. Every generation path goes through
+     * here so a config node wired into a node applies the same way whether it is a first generation, a retry or a
+     * 3D follow-up operation.
+     */
+    const nodeGenerationConfig = useCallback(
+        (node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode) => {
+            const source = node ? getParameterSourceNode(node.id, nodesRef.current, connectionsRef.current) : null;
+            return buildGenerationConfig(effectiveConfig, node, mode, source ? pickParameterMetadata(source.metadata) : undefined);
+        },
+        [effectiveConfig],
+    );
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -390,7 +413,7 @@ function InfiniteCanvasPage() {
             videoPollIdsRef.current.add(node.id);
             let controller: AbortController | undefined;
             try {
-                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
+                const generationConfig = nodeGenerationConfig(node, "video");
                 if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                     if (silent) {
                         setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: t("workbench.configFirst") } } : item)));
@@ -448,7 +471,7 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
     );
 
     const pollModel3dNodeTask = useCallback(
@@ -458,7 +481,7 @@ function InfiniteCanvasPage() {
             model3dPollIdsRef.current.add(node.id);
             let controller: AbortController | undefined;
             try {
-                const generationConfig = buildGenerationConfig(effectiveConfig, node, "model3d");
+                const generationConfig = nodeGenerationConfig(node, "model3d");
                 if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                     if (silent) {
                         setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: t("workbench.configFirst") } } : item)));
@@ -503,7 +526,7 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
     );
 
     /**
@@ -518,7 +541,7 @@ function InfiniteCanvasPage() {
         async (sourceNode: CanvasNodeData, prompts?: Array<{ prompt: string; view: MultiviewView }>, source: "tripo" | "builtin" = "tripo") => {
             if (!sourceNode.metadata?.content) return;
             // The built-in path is an ordinary image edit, so it runs on the image model and its channel.
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, source === "builtin" ? "image" : "model3d");
+            const generationConfig = nodeGenerationConfig(sourceNode, source === "builtin" ? "image" : "model3d");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -616,7 +639,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId((current) => (current === sourceNode.id ? null : current));
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     /**
@@ -628,7 +651,7 @@ function InfiniteCanvasPage() {
             const taskId = node.metadata?.model3dConvertTaskId;
             const format = node.metadata?.model3dConvertedFormat;
             if (!taskId || !format || node.metadata?.model3dConvertedKey || generationRequestsRef.current.has(node.id)) return;
-            const generationConfig = buildGenerationConfig(effectiveConfig, node, "model3d");
+            const generationConfig = nodeGenerationConfig(node, "model3d");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) return;
             const controller = startGenerationRequest(node.id, node.id, node.id);
             try {
@@ -645,7 +668,7 @@ function InfiniteCanvasPage() {
                 finishGenerationRequest(node.id, controller);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, resolveHistoryByTaskId, startGenerationRequest, t],
+        [finishGenerationRequest, isAiConfigReady, nodeGenerationConfig, resolveHistoryByTaskId, startGenerationRequest, t],
     );
 
     /**
@@ -692,7 +715,7 @@ function InfiniteCanvasPage() {
      */
     const runModel3dOperation = useCallback(
         async (sourceNode: CanvasNodeData, op: Model3dOpId, params: Model3dOpParams) => {
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, "model3d");
+            const generationConfig = nodeGenerationConfig(sourceNode, "model3d");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -828,7 +851,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId((current) => (current === targetId ? null : current));
             }
         },
-        [createModel3dPartNodes, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
+        [createModel3dPartNodes, finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
@@ -966,10 +989,6 @@ function InfiniteCanvasPage() {
     }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
 
     useEffect(() => {
-        if (!dialogNodeId) setNodeImageSettingsOpen(false);
-    }, [dialogNodeId]);
-
-    useEffect(() => {
         if (!projectLoaded) return;
         if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
         viewportSaveTimerRef.current = setTimeout(() => {
@@ -1042,10 +1061,10 @@ function InfiniteCanvasPage() {
 
     const keepNodeToolbar = useCallback(
         (nodeId: string) => {
-            if (nodeDraggingRef.current || nodeImageSettingsOpen || !selectedNodeIdsRef.current.has(nodeId)) return;
+            if (nodeDraggingRef.current || !selectedNodeIdsRef.current.has(nodeId)) return;
             setToolbarNodeId(nodeId);
         },
-        [nodeImageSettingsOpen],
+        [],
     );
 
     const hideNodeToolbar = useCallback(() => {}, []);
@@ -1059,10 +1078,10 @@ function InfiniteCanvasPage() {
                 message.warning(t("canvas.projectPage.configConnection"));
                 return;
             }
-            const { fromNodeId, toNodeId } = connection;
+            const { fromNodeId, toNodeId, kind } = connection;
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
+                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId, ...(kind ? { kind } : {}) }]);
             }
             setContextMenu(null);
         },
@@ -1203,6 +1222,24 @@ function InfiniteCanvasPage() {
         });
         return map;
     }, [connections, nodes]);
+    /**
+     * The config node feeding each node's parameters. A config node wired onward stops being a fan-in hub and becomes
+     * a parameter source, so its values override the downstream node's own metadata on generate.
+     */
+    const parameterSourceByNodeId = useMemo(() => {
+        const map = new Map<string, CanvasNodeData>();
+        nodes.forEach((node) => {
+            if (node.type === CanvasNodeType.Config) return;
+            const source = getParameterSourceNode(node.id, nodes, connections);
+            if (source) map.set(node.id, source);
+        });
+        return map;
+    }, [connections, nodes]);
+    const parameterTargetCountById = useMemo(() => {
+        const map = new Map<string, number>();
+        parameterSourceByNodeId.forEach((source) => map.set(source.id, (map.get(source.id) || 0) + 1));
+        return map;
+    }, [parameterSourceByNodeId]);
     const mentionReferencesByNodeId = useMemo(() => {
         const map = new Map<string, ReturnType<typeof buildNodeMentionReferences>>();
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
@@ -1219,6 +1256,30 @@ function InfiniteCanvasPage() {
         });
         return map;
     }, [connections, nodeById]);
+    /**
+     * Which multiview angle each connection into a 3D node feeds, resolved through the same helper the request uses so
+     * the labels cannot drift from what is actually sent. An image inside a group shares the group's single connection,
+     * so several angles can land on one line.
+     */
+    const multiviewLabelsByConnectionId = useMemo(() => {
+        const map = new Map<string, { items: Array<{ nodeId: string; title: string; view: MultiviewView }>; assignment: Array<{ nodeId: string; view: MultiviewView }> }>();
+        nodes.forEach((node) => {
+            if (node.type !== CanvasNodeType.Model3d) return;
+            const assignment = resolveMultiviewAssignment(node.id, nodes, connections);
+            if (!assignment.length) return;
+            assignment.forEach(({ nodeId, view }) => {
+                const imageNode = nodeById.get(nodeId);
+                const groupId = imageNode?.metadata?.groupId;
+                const connection = connections.find((item) => item.toNodeId === node.id && (item.fromNodeId === nodeId || (groupId ? item.fromNodeId === groupId : false)));
+                if (!connection) return;
+                const entry = { nodeId, title: imageNode?.title || nodeId, view };
+                const existing = map.get(connection.id);
+                if (existing) existing.items.push(entry);
+                else map.set(connection.id, { items: [entry], assignment });
+            });
+        });
+        return map;
+    }, [connections, nodeById, nodes]);
     const referenceConnectedNodeIds = useMemo(() => new Set([referencePickerNodeId, ...(referencePickerNodeId ? connectedNodesByNodeId.get(referencePickerNodeId)?.flatMap((node) => node.type === CanvasNodeType.Group ? [node.id, ...getGroupResourceNodes(node.id, nodes).map((child) => child.id)] : [node.id]) || [] : [])].filter((id): id is string => Boolean(id))), [connectedNodesByNodeId, nodes, referencePickerNodeId]);
     const { applyAgentOps } = useAgentBridge({
         projectId,
@@ -2203,6 +2264,27 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
     }, []);
 
+    /**
+     * Reassigns which multiview angle an image feeds. When the chosen angle already belongs to another image of the same
+     * 3D node the two swap rather than one overwriting the other: the set of angles stays intact, so front stays claimed
+     * and Tripo's "front view is required" cannot be tripped by an edit here.
+     */
+    const assignMultiviewView = useCallback(
+        (nodeId: string, view: MultiviewView) => {
+            const current = multiviewViewMenu?.assignment.find((item) => item.nodeId === nodeId);
+            const occupant = multiviewViewMenu?.assignment.find((item) => item.nodeId !== nodeId && item.view === view);
+            setNodes((prev) =>
+                prev.map((node) => {
+                    if (node.id === nodeId) return { ...node, metadata: { ...node.metadata, multiviewView: view } };
+                    if (occupant && node.id === occupant.nodeId && current) return { ...node, metadata: { ...node.metadata, multiviewView: current.view } };
+                    return node;
+                }),
+            );
+            setMultiviewViewMenu(null);
+        },
+        [multiviewViewMenu],
+    );
+
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
     }, []);
@@ -2418,7 +2500,7 @@ function InfiniteCanvasPage() {
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
+            const generationConfig = { ...nodeGenerationConfig(node, "image"), count: "1", size: node.metadata?.size || "auto" };
             if (payload.generate && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2484,7 +2566,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -2515,7 +2597,7 @@ function InfiniteCanvasPage() {
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1" };
+            const generationConfig = { ...nodeGenerationConfig(node, "image"), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2567,7 +2649,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest, t, trackGeneration],
+        [finishGenerationRequest, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2756,7 +2838,7 @@ function InfiniteCanvasPage() {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            const generationConfig = nodeGenerationConfig(sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -3274,7 +3356,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
+        [completeVideoNodeTask, finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3299,7 +3381,7 @@ function InfiniteCanvasPage() {
                           background: savedImageMetadata.background ?? effectiveConfig.background,
                           count: "1",
                       }
-                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
+                    : { ...nodeGenerationConfig(sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -3444,7 +3526,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t, trackGeneration],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t, trackGeneration],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
@@ -3613,6 +3695,15 @@ function InfiniteCanvasPage() {
         (panelNode: CanvasNodeData) =>
             getNodeDefinition(panelNode.type)?.Panel ? (
                 renderPluginPanel(panelNode)
+            ) : panelNode.type === CanvasNodeType.Config && isConfigParameterSource(panelNode.id, nodes, connections) ? (
+                <div data-canvas-no-zoom className="rounded-2xl border p-3 shadow-2xl backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+                    <CanvasNodeParameterRows
+                        mode={panelNode.metadata?.generationMode || "image"}
+                        config={nodeGenerationConfig(panelNode, panelNode.metadata?.generationMode || "image")}
+                        textCount={panelNode.metadata?.textCount}
+                        onPatch={(patch) => handleConfigNodeChange(panelNode.id, patch)}
+                    />
+                </div>
             ) : panelNode.type === CanvasNodeType.Config ? (
                 <CanvasConfigComposer
                     nodeId={panelNode.id}
@@ -3639,13 +3730,29 @@ function InfiniteCanvasPage() {
                     onDisconnectReference={disconnectNodeReference}
                     onStartReferenceSelection={startNodeReferenceSelection}
                     modeOverride={getNodeDefinition(panelNode.type)?.useBuiltinPanel?.mode}
-                    onImageSettingsOpenChange={(open) => {
-                        setNodeImageSettingsOpen(open);
-                        if (open) setToolbarNodeId(null);
-                    }}
+                    parameterSource={parameterSourceForNode(parameterSourceByNodeId.get(panelNode.id))}
+                    onFocusNode={focusNode}
                 />
             ),
-        [configInputsById, confirmStopGeneration, connectedNodesByNodeId, disconnectNodeReference, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, nodes, renderPluginPanel, runningNodeId, startNodeReferenceSelection],
+        [
+            configInputsById,
+            confirmStopGeneration,
+            connectedNodesByNodeId,
+            connections,
+            disconnectNodeReference,
+            focusNode,
+            handleConfigNodeChange,
+            handleGenerateNode,
+            handleNodePromptChange,
+            mentionReferencesByNodeId,
+            nodeGenerationConfig,
+            nodes,
+            parameterSourceByNodeId,
+            renderPluginPanel,
+            runningNodeId,
+            startNodeReferenceSelection,
+            theme,
+        ],
     );
 
     const renderNodeContentPanel = useCallback(
@@ -3654,6 +3761,7 @@ function InfiniteCanvasPage() {
                 node={contentNode}
                 isRunning={runningNodeId === contentNode.id}
                 inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
+                parameterTargetCount={parameterTargetCountById.get(contentNode.id) || 0}
                 onConfigChange={handleConfigNodeChange}
                 onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                 onStop={confirmStopGeneration}
@@ -3663,7 +3771,7 @@ function InfiniteCanvasPage() {
                 }}
             />
         ),
-        [configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, runningNodeId],
+        [configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, parameterTargetCountById, runningNodeId],
     );
 
     if (!projectLoaded) return <CanvasRefreshShell />;
@@ -3723,6 +3831,7 @@ function InfiniteCanvasPage() {
                                 const from = nodeById.get(connection.fromNodeId);
                                 const to = nodeById.get(connection.toNodeId);
                                 if (!from || !to) return null;
+                                const multiview = multiviewLabelsByConnectionId.get(connection.id);
 
                                 return (
                                     <ConnectionPath
@@ -3731,6 +3840,8 @@ function InfiniteCanvasPage() {
                                         from={from}
                                         to={to}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
+                                        label={multiview?.items.map((item) => t(`canvas.model3dOps.views.${item.view}`)).join(" · ")}
+                                        onLabelClick={multiview ? (event) => setMultiviewViewMenu({ x: event.clientX, y: event.clientY, items: multiview.items, assignment: multiview.assignment }) : undefined}
                                         onSelect={() => {
                                             setSelectedConnectionId(connection.id);
                                             setSelectedNodeIds(new Set());
@@ -3821,7 +3932,7 @@ function InfiniteCanvasPage() {
                 </InfiniteCanvas>
 
                 <CanvasNodeHoverToolbar
-                    node={isNodeDragging || isNodeResizing || nodeImageSettingsOpen || expandedBatchNodeIds.has(toolbarNode?.id || "") ? null : toolbarNode}
+                    node={isNodeDragging || isNodeResizing || expandedBatchNodeIds.has(toolbarNode?.id || "") ? null : toolbarNode}
                     viewport={viewport}
                     extraTools={toolbarNode ? buildNodeToolbarItems(toolbarNode) : undefined}
                     onKeep={keepNodeToolbar}
@@ -3892,6 +4003,7 @@ function InfiniteCanvasPage() {
 
                 <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
 
+                {multiviewViewMenu ? <CanvasMultiviewViewMenu state={multiviewViewMenu} onSelect={assignMultiviewView} onClose={() => setMultiviewViewMenu(null)} /> : null}
                 {contextMenu ? (
                     <CanvasNodeContextMenu
                         menu={contextMenu}

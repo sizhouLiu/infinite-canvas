@@ -5,6 +5,9 @@ type CanvasUiStore = {
     editingProjectTitle: string;
     selectedProjectIds: string[];
     deleteProjectIds: string[];
+    /** Whether the node panel shows its parameter rows expanded; a per-session view preference, not canvas data. */
+    parameterRowsOpen: boolean;
+    setParameterRowsOpen: (open: boolean) => void;
     startEditingProject: (id: string, title: string) => void;
     setEditingProjectTitle: (title: string) => void;
     stopEditingProject: () => void;
@@ -18,6 +21,8 @@ export const useCanvasUiStore = create<CanvasUiStore>((set) => ({
     editingProjectTitle: "",
     selectedProjectIds: [],
     deleteProjectIds: [],
+    parameterRowsOpen: true,
+    setParameterRowsOpen: (parameterRowsOpen) => set({ parameterRowsOpen }),
     startEditingProject: (editingProjectId, editingProjectTitle) => set({ editingProjectId, editingProjectTitle }),
     setEditingProjectTitle: (editingProjectTitle) => set({ editingProjectTitle }),
     stopEditingProject: () => set({ editingProjectId: null }),

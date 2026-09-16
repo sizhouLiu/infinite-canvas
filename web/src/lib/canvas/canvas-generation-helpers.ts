@@ -4,7 +4,7 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { MULTIVIEW_VIEWS, type MultiviewView } from "@/services/api/model3d-ops";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
-import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
+import { buildNodeGenerationInputs, flattenGenerationInputs, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { ReferenceImage } from "@/types/image";
@@ -105,29 +105,70 @@ export function getInputSummary(inputs: NodeGenerationInput[]) {
     };
 }
 
-export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
+/**
+ * Parameter keys a config node can hand downstream. Deliberately a whitelist: a parameter node carries the same
+ * metadata shape as any other node, and passing it wholesale would drag `content`, `prompt`, `storageKey` and
+ * `status` into the node being generated.
+ */
+export const PARAMETER_METADATA_KEYS = [
+    "model",
+    "reasoningEffort",
+    "quality",
+    "size",
+    "background",
+    "count",
+    "textCount",
+    "seconds",
+    "vquality",
+    "generateAudio",
+    "watermark",
+    "videoMode",
+    "audioVoice",
+    "audioFormat",
+    "audioSpeed",
+    "audioInstructions",
+    "model3dTexture",
+    "model3dPbr",
+    "model3dTextureQuality",
+    "model3dFaceLimit",
+    "model3dQuad",
+] as const satisfies ReadonlyArray<keyof CanvasNodeMetadata>;
+
+export type ParameterMetadata = Pick<CanvasNodeMetadata, (typeof PARAMETER_METADATA_KEYS)[number]>;
+
+export function pickParameterMetadata(metadata: CanvasNodeMetadata | undefined): ParameterMetadata {
+    if (!metadata) return {};
+    return Object.fromEntries(PARAMETER_METADATA_KEYS.flatMap((key) => (metadata[key] === undefined ? [] : [[key, metadata[key]]]))) as ParameterMetadata;
+}
+
+/**
+ * Resolves the config a node generates with. An upstream parameter node (a config node wired into this node)
+ * wins over the node's own metadata, which in turn wins over the global config.
+ */
+export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode, parameters?: ParameterMetadata): AiConfig {
+    const metadata = { ...node?.metadata, ...parameters };
     return {
         ...config,
-        model: resolveModelForCapability(config, node?.metadata?.model, mode),
-        reasoningEffort: node?.metadata?.reasoningEffort || config.reasoningEffort || defaultConfig.reasoningEffort,
-        quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
-        size: node?.metadata?.size || config.size || defaultConfig.size,
-        background: node?.metadata?.background ?? config.background ?? defaultConfig.background,
-        videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
-        vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
-        videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
-        videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
-        videoMode: node?.metadata?.videoMode || config.videoMode || defaultConfig.videoMode,
-        audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
-        audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
-        audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
-        audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
-        model3dTexture: node?.metadata?.model3dTexture || config.model3dTexture || defaultConfig.model3dTexture,
-        model3dPbr: node?.metadata?.model3dPbr || config.model3dPbr || defaultConfig.model3dPbr,
-        model3dTextureQuality: node?.metadata?.model3dTextureQuality || config.model3dTextureQuality || defaultConfig.model3dTextureQuality,
-        model3dFaceLimit: node?.metadata?.model3dFaceLimit ?? config.model3dFaceLimit ?? defaultConfig.model3dFaceLimit,
-        model3dQuad: node?.metadata?.model3dQuad || config.model3dQuad || defaultConfig.model3dQuad,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        model: resolveModelForCapability(config, metadata.model, mode),
+        reasoningEffort: metadata.reasoningEffort || config.reasoningEffort || defaultConfig.reasoningEffort,
+        quality: metadata.quality || config.quality || defaultConfig.quality,
+        size: metadata.size || config.size || defaultConfig.size,
+        background: metadata.background ?? config.background ?? defaultConfig.background,
+        videoSeconds: metadata.seconds || config.videoSeconds || defaultConfig.videoSeconds,
+        vquality: metadata.vquality || config.vquality || defaultConfig.vquality,
+        videoGenerateAudio: metadata.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoWatermark: metadata.watermark || config.videoWatermark || defaultConfig.videoWatermark,
+        videoMode: metadata.videoMode || config.videoMode || defaultConfig.videoMode,
+        audioVoice: metadata.audioVoice || config.audioVoice || defaultConfig.audioVoice,
+        audioFormat: metadata.audioFormat || config.audioFormat || defaultConfig.audioFormat,
+        audioSpeed: metadata.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
+        audioInstructions: metadata.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
+        model3dTexture: metadata.model3dTexture || config.model3dTexture || defaultConfig.model3dTexture,
+        model3dPbr: metadata.model3dPbr || config.model3dPbr || defaultConfig.model3dPbr,
+        model3dTextureQuality: metadata.model3dTextureQuality || config.model3dTextureQuality || defaultConfig.model3dTextureQuality,
+        model3dFaceLimit: metadata.model3dFaceLimit ?? config.model3dFaceLimit ?? defaultConfig.model3dFaceLimit,
+        model3dQuad: metadata.model3dQuad || config.model3dQuad || defaultConfig.model3dQuad,
+        count: String(metadata.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
 }
 
@@ -170,6 +211,23 @@ export function assignMultiviewViews(images: ReferenceImage[], nodes: CanvasNode
     return carried.map((view) => view ?? free[next++]);
 }
 
+/**
+ * The angle each upstream image feeds a 3D node, resolved the same way the request itself resolves it: the
+ * generation input order, trimmed to the views Tripo accepts, then run through assignMultiviewViews. Reading the
+ * assignment anywhere else (canvas labels, the angle menu) has to go through here, or the labels drift from what
+ * actually gets sent.
+ *
+ * A single image runs image-to-model instead, which has no angles, so that case returns nothing.
+ */
+export function resolveMultiviewAssignment(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const images = flattenGenerationInputs(buildNodeGenerationInputs(nodeId, nodes, connections)).filter((input) => input.type === "image" && input.image);
+    if (images.length < 2) return [];
+    const usable = images.slice(0, MULTIVIEW_VIEWS.length);
+    const referenceImages = usable.map((input) => input.image!);
+    const views = assignMultiviewViews(referenceImages, nodes);
+    return usable.map((input, index) => ({ nodeId: input.nodeId, view: views[index] }));
+}
+
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
         node.metadata?.status === "loading"
@@ -193,8 +251,14 @@ export function isGenerationCanceled(error: unknown) {
     return error instanceof Error && (error.message === i18n.t("common.requestCanceled") || error.name === "AbortError");
 }
 
+/**
+ * The config node a failed generation was orchestrated from, so a retry reuses its prompt and references. Parameter
+ * connections are skipped: a config node that only supplies parameters holds no prompt or references of its own, and
+ * taking it as the source would retry with an empty context.
+ */
 export function findRetrySourceNode(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
-    const queue = connections.filter((connection) => connection.toNodeId === nodeId).map((connection) => connection.fromNodeId);
+    const upstream = (id: string) => connections.filter((connection) => connection.toNodeId === id && connection.kind !== "parameter").map((connection) => connection.fromNodeId);
+    const queue = upstream(nodeId);
     const visited = new Set<string>();
     while (queue.length) {
         const id = queue.shift()!;
@@ -202,7 +266,7 @@ export function findRetrySourceNode(nodeId: string, nodes: CanvasNodeData[], con
         visited.add(id);
         const node = nodes.find((item) => item.id === id);
         if (node?.type === CanvasNodeType.Config) return node;
-        connections.filter((connection) => connection.toNodeId === id).forEach((connection) => queue.push(connection.fromNodeId));
+        upstream(id).forEach((fromNodeId) => queue.push(fromNodeId));
     }
     return null;
 }

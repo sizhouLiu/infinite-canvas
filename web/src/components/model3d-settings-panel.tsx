@@ -1,9 +1,11 @@
 import { type ReactNode } from "react";
+import { Slider, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { isModel3dFaceLimitAuto, MODEL3D_FACE_LIMIT_AUTO, MODEL3D_FACE_LIMIT_DEFAULT, MODEL3D_FACE_LIMIT_MAX, MODEL3D_FACE_LIMIT_MIN, MODEL3D_FACE_LIMIT_STEP, normalizeModel3dFaceLimitValue } from "@/lib/model3d-face-limit";
 import { supportsModel3dQuad } from "@/services/api/model3d";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -30,13 +32,6 @@ export function normalizeModel3dTextureQualityValue(value: string | undefined) {
     return model3dTextureQualityOptions.some((item) => item.value === value) ? value! : "standard";
 }
 
-/** Face limit ranges differ per model version, so the value is passed through and Tripo validates it. */
-export function normalizeModel3dFaceLimitValue(value: string | undefined) {
-    const limit = Number(value);
-    if (!Number.isFinite(limit) || limit < 1) return "";
-    return String(Math.max(1, Math.floor(limit)));
-}
-
 export function model3dTextureLabel(value: string | undefined) {
     return i18n.t(`settingsPanels.model3d.onOff.${normalizeModel3dTextureValue(value)}`);
 }
@@ -55,7 +50,7 @@ export function model3dTextureQualityLabel(value: string | undefined) {
 
 export function model3dFaceLimitLabel(value: string | undefined) {
     const limit = normalizeModel3dFaceLimitValue(value);
-    return limit || i18n.t("settingsPanels.model3d.faceLimitAuto");
+    return limit === MODEL3D_FACE_LIMIT_AUTO ? i18n.t("settingsPanels.model3d.faceLimitAuto") : limit;
 }
 
 type Model3dSettingKey = "model3dTexture" | "model3dPbr" | "model3dTextureQuality" | "model3dFaceLimit" | "model3dQuad";
@@ -76,6 +71,9 @@ export function Model3dSettingsPanel({ config, onConfigChange, theme, showTitle 
     // Quad is only accepted by P2 and H-series v3.0+, so the row is hidden rather than offered and rejected.
     const quadAvailable = supportsModel3dQuad(config.model || config.model3dModel);
     const quad = normalizeModel3dQuadValue(config.model3dQuad);
+    // An empty face limit means auto: no face_limit is sent and Tripo picks the count.
+    const faceLimitAuto = isModel3dFaceLimitAuto(config.model3dFaceLimit);
+    const faceLimit = faceLimitAuto ? MODEL3D_FACE_LIMIT_DEFAULT : Number(normalizeModel3dFaceLimitValue(config.model3dFaceLimit));
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -125,21 +123,56 @@ export function Model3dSettingsPanel({ config, onConfigChange, theme, showTitle 
                     </SettingGroup>
                 ) : null}
                 <SettingGroup title={t("settingsPanels.model3d.faceLimit")} color={theme.node.muted}>
-                    <input
-                        type="number"
-                        min={1}
-                        step={100}
-                        placeholder={t("settingsPanels.model3d.faceLimitAuto")}
-                        className="h-9 w-full rounded-full border bg-transparent px-3 text-center text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }}
-                        value={config.model3dFaceLimit || ""}
-                        onChange={(event) => onConfigChange("model3dFaceLimit", event.target.value)}
-                        onBlur={(event) => onConfigChange("model3dFaceLimit", normalizeModel3dFaceLimitValue(event.target.value))}
-                        onMouseDown={(event) => event.stopPropagation()}
-                    />
+                    <div className="flex items-center justify-between gap-3" onMouseDown={(event) => event.stopPropagation()}>
+                        <span className="text-xs" style={{ color: theme.node.muted }}>
+                            {t("settingsPanels.model3d.faceLimitAuto")}
+                        </span>
+                        <Switch size="small" checked={faceLimitAuto} onChange={(checked) => onConfigChange("model3dFaceLimit", checked ? MODEL3D_FACE_LIMIT_AUTO : String(MODEL3D_FACE_LIMIT_DEFAULT))} />
+                    </div>
+                    {faceLimitAuto ? null : (
+                        <div className="flex items-center gap-3" onMouseDown={(event) => event.stopPropagation()}>
+                            <Slider
+                                className="min-w-0 flex-1"
+                                min={MODEL3D_FACE_LIMIT_MIN}
+                                max={MODEL3D_FACE_LIMIT_MAX}
+                                step={MODEL3D_FACE_LIMIT_STEP}
+                                value={faceLimit}
+                                onChange={(value) => onConfigChange("model3dFaceLimit", String(Array.isArray(value) ? value[0] : value))}
+                            />
+                            <FaceLimitInput value={faceLimit} theme={theme} onCommit={(value) => onConfigChange("model3dFaceLimit", String(value))} />
+                        </div>
+                    )}
                 </SettingGroup>
             </div>
         </ImageSettingsTheme>
+    );
+}
+
+function FaceLimitInput({ value, theme, onCommit }: { value: number; theme: CanvasTheme; onCommit: (value: number) => void }) {
+    const commit = (input: HTMLInputElement) => {
+        const normalized = normalizeModel3dFaceLimitValue(input.value);
+        const next = normalized === MODEL3D_FACE_LIMIT_AUTO ? MODEL3D_FACE_LIMIT_DEFAULT : Number(normalized);
+        input.value = String(next);
+        onCommit(next);
+    };
+
+    return (
+        <label className="flex h-9 w-[82px] shrink-0 overflow-hidden rounded-xl text-sm" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <input
+                type="number"
+                min={MODEL3D_FACE_LIMIT_MIN}
+                max={MODEL3D_FACE_LIMIT_MAX}
+                step={MODEL3D_FACE_LIMIT_STEP}
+                className="min-w-0 flex-1 bg-transparent px-2 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                defaultValue={value}
+                key={value}
+                onBlur={(event) => commit(event.currentTarget)}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+            />
+        </label>
     );
 }
 

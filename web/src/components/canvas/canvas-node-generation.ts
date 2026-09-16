@@ -135,7 +135,7 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
     });
 }
 
-function flattenGenerationInputs(inputs: NodeGenerationInput[]) {
+export function flattenGenerationInputs(inputs: NodeGenerationInput[]) {
     const resources = inputs.flatMap((input) => (input.type === "group" ? input.children : [input]));
     return [...new Map(resources.map((input) => [input.nodeId, input])).values()];
 }

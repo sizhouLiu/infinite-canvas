@@ -145,6 +145,7 @@ export function normalizeConnection(firstNodeId: string, secondNodeId: string, n
     if (first.type === CanvasNodeType.Config && second.type === CanvasNodeType.Config) return null;
     if (second.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
     if (first.type === CanvasNodeType.Config && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
-    if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
+    // Drawn out of a config node: it feeds the target's generation parameters rather than acting as a fan-in hub.
+    if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id, kind: "parameter" as const };
     return { fromNodeId: first.id, toNodeId: second.id };
 }

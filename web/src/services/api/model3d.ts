@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { isModel3dFaceLimitAuto } from "@/lib/model3d-face-limit";
 import { modelOptionName, resolveModelRequestConfig, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import {
     apiText,
@@ -78,7 +79,7 @@ export async function uploadModel3dImage(config: AiConfig, file: File, options?:
 
 /** Config keeps these as strings for the settings panel; Tripo wants booleans and a number. */
 export function model3dRequestOptions(config: AiConfig): Pick<Model3dGenerationOptions, "faceLimit" | "texture" | "pbr" | "textureQuality" | "quad"> {
-    const faceLimit = Number(config.model3dFaceLimit);
+    const faceLimit = isModel3dFaceLimitAuto(config.model3dFaceLimit) ? Number.NaN : Number(config.model3dFaceLimit);
     const model = config.model || config.model3dModel;
     return {
         texture: config.model3dTexture !== "false",

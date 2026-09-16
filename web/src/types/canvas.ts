@@ -126,6 +126,11 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+    /**
+     * Set on a connection drawn out of a config node to hand its parameters downstream. Generation also connects a
+     * config node to the result it just produced, so the direction alone cannot tell the two apart.
+     */
+    kind?: "parameter";
 };
 
 export type CanvasAssistantReference = {

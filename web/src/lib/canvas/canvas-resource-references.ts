@@ -67,17 +67,35 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNodeData
     return [];
 }
 
+// A parameter connection carries settings, not material, so it never contributes an input.
 function getContextInputNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     return connections
-        .filter((connection) => connection.toNodeId === nodeId)
+        .filter((connection) => connection.toNodeId === nodeId && connection.kind !== "parameter")
         .map((connection) => nodes.find((node) => node.id === connection.fromNodeId))
         .filter((node): node is CanvasNodeData => Boolean(node && isCanvasReferenceNode(node, nodes)));
 }
 
 function getConnectedConfigInputNodes(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
     const configConnection = connections.find((connection) => connection.fromNodeId === nodeId && nodes.find((node) => node.id === connection.toNodeId)?.type === CanvasNodeType.Config);
-    if (!configConnection) return [];
+    // A config node wired onward is a parameter source, not a fan-in hub: treating it as one here would pull its
+    // sibling inputs in as this node's own references.
+    if (!configConnection || isParameterSourceNode(configConnection.toNodeId, connections)) return [];
     return getContextInputNodes(configConnection.toNodeId, nodes, connections).filter((node) => node.id !== nodeId);
+}
+
+function isParameterSourceNode(configNodeId: string, connections: CanvasConnection[]) {
+    return connections.some((connection) => connection.fromNodeId === configNodeId && connection.kind === "parameter");
+}
+
+/** The config node feeding this node's generation parameters, if one is wired into it. */
+export function getParameterSourceNode(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const connection = connections.find((item) => item.toNodeId === nodeId && item.kind === "parameter" && nodes.find((node) => node.id === item.fromNodeId)?.type === CanvasNodeType.Config);
+    return connection ? nodes.find((node) => node.id === connection.fromNodeId) || null : null;
+}
+
+/** Whether this config node hands its parameters downstream rather than acting as a fan-in hub. */
+export function isConfigParameterSource(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    return nodes.find((node) => node.id === nodeId)?.type === CanvasNodeType.Config && isParameterSourceNode(nodeId, connections);
 }
 
 function hasGroupResources(node: CanvasNodeData, nodes: CanvasNodeData[]) {

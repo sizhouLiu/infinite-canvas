@@ -247,7 +247,10 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
 
                 controls = new OrbitControls(camera, canvas);
                 controls.enableDamping = true;
-                controls.enablePan = false;
+                // Right-drag (or two-finger drag) moves the model within the frame; screen-space panning keeps it
+                // following the pointer regardless of how far the camera has been orbited.
+                controls.enablePan = true;
+                controls.screenSpacePanning = true;
                 controls.enabled = interactive;
                 controlsRef.current = controls;
 
@@ -272,7 +275,9 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                     model.position.sub(sphere.center);
                     scene.add(model);
                     const distance = (sphere.radius || 1) / Math.sin((camera.fov * Math.PI) / 360);
-                    const home = new THREE.Vector3(distance * 0.6, distance * 0.5, distance * 0.9);
+                    // Looking down the X axis: level with the model, no elevation. The 1.2 keeps the same framing
+                    // margin the previous 3/4 angle had, so the model does not suddenly fill the frame edge to edge.
+                    const home = new THREE.Vector3(distance * 1.2, 0, 0);
                     camera.position.copy(home);
                     camera.lookAt(0, 0, 0);
                     controls.target.set(0, 0, 0);
@@ -438,6 +443,11 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                 style={{ cursor: interactive ? "grab" : "default", pointerEvents: interactive ? "auto" : "none" }}
                 onPointerDown={(event) => interactive && event.stopPropagation()}
                 onWheel={(event) => interactive && event.stopPropagation()}
+                onContextMenu={(event) => {
+                    if (!interactive) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                }}
                 onDoubleClick={(event) => showControls && event.stopPropagation()}
             />
             {status !== "ready" ? (
