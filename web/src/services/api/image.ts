@@ -309,6 +309,38 @@ function readApiErrorMessage(value: unknown): string {
     );
 }
 
+/**
+ * Seconds the provider asks us to wait, or null when the failure is not a rate limit. Read here, while the
+ * axios error is still intact: every call site wraps failures in `new Error(message)`, which would otherwise
+ * drop the status, the `Retry-After` header, and the provider's error code. The value rides along on the
+ * thrown error via `imageError` so a caller can back off instead of only reporting the text.
+ *
+ * Recognizes HTTP 429, Tripo's `code: 2000` generation limit, and a message that names a limit; the delay is
+ * clamped so an absurd or hostile header cannot stall a run.
+ */
+const MIN_RETRY_SECONDS = 2;
+const MAX_RETRY_SECONDS = 30;
+
+export function readRetryAfterSeconds(error: unknown): number | null {
+    if (!axios.isAxiosError(error)) return null;
+    const data = error.response?.data as { code?: number; message?: unknown } | undefined;
+    const text = String(readApiErrorMessage(data) || error.message || "");
+    const isLimit = error.response?.status === 429 || data?.code === 2000 || /exceeded the limit|rate limit|too many requests/i.test(text);
+    if (!isLimit) return null;
+    const header = error.response?.headers?.["retry-after"] ?? error.response?.headers?.["Retry-After"];
+    const parsed = Number(Array.isArray(header) ? header[0] : header);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.min(Math.max(parsed, MIN_RETRY_SECONDS), MAX_RETRY_SECONDS);
+    return MIN_RETRY_SECONDS * 2;
+}
+
+/** Wrap an API failure as an Error carrying the readable message plus its retry hint. */
+export function imageError(error: unknown, fallback: string) {
+    const wrapped = new Error(readAxiosError(error, fallback));
+    const retryAfter = readRetryAfterSeconds(error);
+    if (retryAfter !== null) (wrapped as Error & { retryAfterSeconds?: number }).retryAfterSeconds = retryAfter;
+    return wrapped;
+}
+
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
@@ -742,21 +774,21 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     if (requestConfig.apiFormat === "tripo") {
         try {
             return await requestTripoImageGeneration(requestConfig, withSystemPrompt(requestConfig, prompt), n, { quality: config.quality, size: config.size, background: config.background }, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImages(requestConfig, prompt, [], n, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     const quality = normalizeQuality(config.quality);
@@ -784,7 +816,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw imageError(error, apiText("requestFailed"));
     }
 }
 
@@ -810,21 +842,21 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     if (requestConfig.apiFormat === "tripo") {
         try {
             return await requestTripoImageEdit(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, { quality: config.quality, size: config.size, background: config.background }, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
 
@@ -858,7 +890,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw imageError(error, apiText("requestFailed"));
     }
 }
 
@@ -879,7 +911,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (text === apiText("noContent")) onDelta(text);
             return text;
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw imageError(error, apiText("requestFailed"));
         }
     }
     try {
@@ -896,7 +928,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         if (answer === apiText("noContent")) onDelta(answer);
         return answer;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw imageError(error, apiText("requestFailed"));
     }
 }
 

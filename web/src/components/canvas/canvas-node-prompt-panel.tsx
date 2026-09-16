@@ -15,6 +15,7 @@ import { CanvasModel3dSettingsPopover, type CanvasModel3dSettingKey } from "./ca
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
+import { MULTIVIEW_VIEWS } from "@/services/api/model3d-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
 
@@ -46,9 +47,17 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
-    // Image-to-3D and multiview-to-3D take the upstream images alone, so 3D generation does not need a prompt
-    // once an image is connected — the request drops it anyway. Every other mode still requires one.
-    const promptOptional = mode === "model3d" && mentionReferences.some((reference) => reference.kind === "image");
+    // Image-to-3D and multiview-to-3D take the upstream images alone, so 3D generation needs no prompt once an
+    // image is connected — the request drops it anyway. The input is hidden rather than left there to be typed
+    // into and silently ignored; every other mode still requires a prompt.
+    const model3dImageCount = mode === "model3d" ? mentionReferences.filter((reference) => reference.kind === "image").length : 0;
+    const promptOptional = model3dImageCount > 0;
+    const model3dHint =
+        model3dImageCount > MULTIVIEW_VIEWS.length
+            ? t("canvas.promptPanel.model3dMultiviewTrimmedHint", { count: model3dImageCount, max: MULTIVIEW_VIEWS.length })
+            : model3dImageCount > 1
+              ? t("canvas.promptPanel.model3dMultiviewHint", { count: model3dImageCount })
+              : t("canvas.promptPanel.model3dSingleImageHint");
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
 
@@ -84,22 +93,32 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             onWheel={(event) => event.stopPropagation()}
         >
             <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
-            <CanvasPromptChipInput
-                value={prompt}
-                references={mentionReferences}
-                onChange={updatePrompt}
-                onSubmit={submit}
-                className="thin-scrollbar h-40 w-full cursor-text resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
-                style={{ background: "transparent", color: theme.node.text }}
-                placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : promptOptional ? "model3dFromImage" : mode}`)}
-            />
+            {promptOptional ? (
+                <div className="flex h-40 w-full items-center justify-center rounded-xl px-4 text-center text-sm leading-5" style={{ color: theme.node.muted }}>
+                    {model3dHint}
+                </div>
+            ) : (
+                <CanvasPromptChipInput
+                    value={prompt}
+                    references={mentionReferences}
+                    onChange={updatePrompt}
+                    onSubmit={submit}
+                    className="thin-scrollbar h-40 w-full cursor-text resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
+                    style={{ background: "transparent", color: theme.node.text }}
+                    placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                />
+            )}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <Tooltip title={t("canvas.promptPanel.expandEditor")}>
-                        <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
-                    </Tooltip>
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+                    {promptOptional ? null : (
+                        <>
+                            <Tooltip title={t("canvas.promptPanel.expandEditor")}>
+                                <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
+                            </Tooltip>
+                            <CanvasPromptLibrary onSelect={updatePrompt} />
+                        </>
+                    )}
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
@@ -155,7 +174,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     </span>
                 </Button>
             </div>
-            <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
+            <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded && !promptOptional} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
                     <CanvasPromptChipInput
@@ -164,7 +183,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                         onChange={updatePrompt}
                         className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-[15px] leading-6 outline-none"
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
-                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : promptOptional ? "model3dFromImage" : mode}`)}
+                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
                     />
                 </div>
             </Modal>

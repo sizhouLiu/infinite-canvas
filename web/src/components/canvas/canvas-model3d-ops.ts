@@ -64,6 +64,8 @@ const OP_DEFINITIONS = (): Record<Model3dOpId, Model3dOpDefinition> => ({
             { key: "model", type: "select", label: i18n.t("canvas.model3dOps.fields.model"), options: enumOptions(SEGMENT_MODELS), defaultValue: SEGMENT_MODELS[0] },
             { key: "granularity", type: "select", label: i18n.t("canvas.model3dOps.fields.granularity"), options: enumOptions(SEGMENT_GRANULARITIES, "canvas.model3dOps.granularities"), defaultValue: SEGMENT_GRANULARITIES[1] },
             { key: "splitByConnectivity", type: "switch", label: i18n.t("canvas.model3dOps.fields.splitByConnectivity"), defaultValue: true },
+            // Tripo returns one glb holding the named parts; this splits it into a node per part locally.
+            { key: "splitParts", type: "switch", label: i18n.t("canvas.model3dOps.fields.splitParts"), defaultValue: true },
         ],
     },
     complete: {

@@ -148,11 +148,26 @@ export function hasResumableModel3dConvertTask(node: CanvasNodeData) {
 }
 
 /**
- * Which multiview angle an upstream image feeds. An image produced by image-to-multiview carries its own
- * view; anything else falls back to connection order, so the first image becomes the required front view.
+ * Which multiview angle each upstream image feeds, assigned across the whole set rather than one image at a
+ * time. An image produced by a multiview run carries its own angle and keeps it; every other image fills an
+ * angle nobody claimed, in front/left/back/right order. Deciding per image duplicates an angle as soon as a
+ * carried angle also comes up in connection order — Tripo canonicalizes two front views without complaining
+ * and returns a mangled mesh, and a duplicate that leaves front unclaimed fails the request outright.
+ *
+ * Callers pass at most MULTIVIEW_VIEWS.length images, so a free angle is always left for each unclaimed one.
  */
-export function multiviewViewForReference(image: ReferenceImage, nodes: CanvasNodeData[], index: number): MultiviewView {
-    return nodes.find((node) => node.id === image.id)?.metadata?.multiviewView || MULTIVIEW_VIEWS[index] || "right";
+export function assignMultiviewViews(images: ReferenceImage[], nodes: CanvasNodeData[]): MultiviewView[] {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const claimed = new Set<MultiviewView>();
+    const carried = images.map((image) => {
+        const view = nodeById.get(image.id)?.metadata?.multiviewView;
+        if (!view || claimed.has(view)) return null;
+        claimed.add(view);
+        return view;
+    });
+    const free = MULTIVIEW_VIEWS.filter((view) => !claimed.has(view));
+    let next = 0;
+    return carried.map((view) => view ?? free[next++]);
 }
 
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {

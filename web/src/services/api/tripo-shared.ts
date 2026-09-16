@@ -92,6 +92,33 @@ export function tripoTaskFailed(message: string) {
     return error;
 }
 
+/**
+ * Tripo's output URLs are signed and its CDN serves model files as octet-stream, so neither the response's
+ * content type nor a stored blob's type identifies the format. Quad output on the H series and rig/retarget
+ * runs with `out_format: fbx` return FBX rather than glb, and the viewer needs to know which loader to use,
+ * so the format is read from the signed URL's path and then confirmed against the file's magic bytes.
+ */
+export function model3dMimeFromUrl(url: string, fallback = "model/gltf-binary") {
+    const path = url.split(/[?#]/)[0];
+    if (/\.fbx$/i.test(path)) return "model/fbx";
+    if (/\.glb$/i.test(path)) return "model/gltf-binary";
+    if (/\.gltf$/i.test(path)) return "model/gltf+json";
+    return fallback;
+}
+
+/** An FBX starts with "Kaydara FBX Binary" (or is ASCII FBX); a glb starts with the "glTF" magic. */
+export async function detectModel3dMime(blob: Blob, fallback: string) {
+    try {
+        const head = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+        const text = String.fromCharCode(...head);
+        if (text.startsWith("glTF")) return "model/gltf-binary";
+        if (text.startsWith("Kaydara FBX") || text.includes("FBX")) return "model/fbx";
+    } catch {
+        // An unreadable head is not worth failing the download over; fall back to the URL's verdict.
+    }
+    return fallback;
+}
+
 /** Upload a file so a generation can reference it; Tripo rejects data: URLs and local blob URLs. */
 export async function uploadTripoFile(config: AiConfig, file: File, options?: TripoRequestOptions) {
     const form = new FormData();

@@ -13,6 +13,8 @@ import {
     tripoHeaders,
     tripoRequest,
     tripoTaskFailed,
+    detectModel3dMime,
+    model3dMimeFromUrl,
     tripoUrl,
     unwrapTripo,
     uploadTripoFile,
@@ -147,8 +149,11 @@ export async function storeGeneratedModel3d(result: Model3dResult): Promise<Uplo
     const response = await fetch(withLocalProxy(result.modelUrl));
     if (!response.ok) throw new Error(apiText("model3dDownloadFailed"));
     const blob = await response.blob();
-    const stored = await uploadMediaFile(blob.type ? blob : new Blob([blob], { type: result.mimeType }), "model3d");
-    return { ...stored, mimeType: stored.mimeType === "application/octet-stream" ? result.mimeType : stored.mimeType };
+    // Quad output on the H series comes back as FBX, so the real format is detected rather than assumed:
+    // the CDN serves octet-stream and the viewer picks its loader from this mime type.
+    const mimeType = await detectModel3dMime(blob, model3dMimeFromUrl(result.modelUrl, result.mimeType));
+    const stored = await uploadMediaFile(new Blob([blob], { type: mimeType }), "model3d");
+    return { ...stored, mimeType };
 }
 
 export async function storeModel3dPreview(previewUrl: string) {

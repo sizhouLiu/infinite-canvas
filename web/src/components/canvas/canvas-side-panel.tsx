@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App, Empty, Input, Popconfirm, Select, Spin, Tag } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Box, Check, ChevronRight, Download, Eye, FileText, Image as ImageIcon, ListChecks, Music2, Plus, Search, Settings2, Square, Trash2, Type, Video } from "lucide-react";
+import { BookOpen, Box, Check, ChevronRight, Copy, Crosshair, Download, Eye, FileText, Image as ImageIcon, Layers, ListChecks, Music2, Plus, Search, Settings2, Square, Trash2, Type, Video, Wrench } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 
@@ -14,6 +14,7 @@ import { fetchSourcePrompts, type Prompt } from "@/services/api/prompts";
 import { uploadMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
+import { useGenerationHistoryStore, type GenerationHistoryKind, type GenerationHistoryRecord } from "@/stores/canvas/use-generation-history-store";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
 import { CANVAS_SIDE_PANEL_MAX_WIDTH, CANVAS_SIDE_PANEL_MIN_WIDTH, CANVAS_SIDE_PANEL_MOTION_MS, useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -24,9 +25,10 @@ import type { InsertAssetPayload } from "./asset-picker-modal";
 const PANEL_MOTION_SECONDS = CANVAS_SIDE_PANEL_MOTION_MS / 1000;
 const PANEL_EASE = [0.22, 1, 0.36, 1] as const;
 
-type PanelTab = "canvas" | "assets" | "prompts";
+type PanelTab = "canvas" | "assets" | "prompts" | "history";
 
 type Props = {
+    projectId: string;
     nodes: CanvasNodeData[];
     selectedNodeIds: Set<string>;
     onFocusNode: (nodeId: string) => void;
@@ -51,7 +53,7 @@ const STATUS_COLOR: Record<string, string> = {
     idle: "transparent",
 };
 
-export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreviewNode, onInsertAsset }: Props) {
+export function CanvasSidePanel({ projectId, nodes, selectedNodeIds, onFocusNode, onPreviewNode, onInsertAsset }: Props) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [tab, setTab] = useState<PanelTab>("canvas");
@@ -104,14 +106,17 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreview
                     <TabButton label={t("canvas.sidePanel.canvas")} active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
                     <TabButton label={t("canvas.sidePanel.assets")} active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
                     <TabButton label={t("canvas.sidePanel.prompts")} active={tab === "prompts"} theme={theme} onClick={() => setTab("prompts")} />
+                    <TabButton label={t("canvas.sidePanel.history")} active={tab === "history"} theme={theme} onClick={() => setTab("history")} />
                 </div>
                 <div className="mt-2 min-h-0 flex-1 overflow-hidden">
                     {tab === "canvas" ? (
                         <CanvasNodesTab nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={onFocusNode} onPreviewNode={onPreviewNode} theme={theme} />
                     ) : tab === "assets" ? (
                         <CanvasAssetsTab onInsert={onInsertAsset} theme={theme} />
-                    ) : (
+                    ) : tab === "prompts" ? (
                         <CanvasPromptsTab onInsert={onInsertAsset} theme={theme} />
+                    ) : (
+                        <CanvasHistoryTab projectId={projectId} nodes={nodes} onFocusNode={onFocusNode} theme={theme} />
                     )}
                 </div>
                 <button type="button" className="absolute inset-y-0 right-0 z-40 w-4 translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("canvas.sidePanel.resize")} />
@@ -605,6 +610,154 @@ function PromptRow({ item, theme, onInsert, onView }: { item: Prompt; theme: Can
                 >
                     <Plus className="size-3.5" />
                 </button>
+            </div>
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// History tab: every generation this project asked for, newest first. Records are metadata only — the task id
+// is what can still find a run on the provider side, so it is the one thing worth copying out of a row.
+// ---------------------------------------------------------------------------
+
+const HISTORY_KIND_ICON: Record<GenerationHistoryKind, typeof Square> = {
+    image: ImageIcon,
+    video: Video,
+    audio: Music2,
+    model3d: Box,
+    multiview: Layers,
+    model3dOp: Wrench,
+};
+
+const HISTORY_STATUS_COLOR: Record<GenerationHistoryRecord["status"], string> = {
+    running: STATUS_COLOR.loading,
+    success: STATUS_COLOR.success,
+    error: STATUS_COLOR.error,
+};
+
+const HISTORY_FILTER_VALUES: Array<"all" | GenerationHistoryKind> = ["all", "image", "video", "audio", "model3d", "multiview", "model3dOp"];
+
+function CanvasHistoryTab({ projectId, nodes, onFocusNode, theme }: { projectId: string; nodes: CanvasNodeData[]; onFocusNode: (nodeId: string) => void; theme: CanvasTheme }) {
+    const { message } = App.useApp();
+    const { t, i18n } = useTranslation();
+    const records = useGenerationHistoryStore((state) => state.records);
+    const removeRecords = useGenerationHistoryStore((state) => state.removeRecords);
+    const clearProject = useGenerationHistoryStore((state) => state.clearProject);
+    const [keyword, setKeyword] = useState("");
+    const [kindFilter, setKindFilter] = useState<string>("all");
+
+    const nodeIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
+    const projectRecords = useMemo(() => records.filter((record) => record.projectId === projectId), [projectId, records]);
+    const filtered = useMemo(() => {
+        const query = keyword.trim().toLowerCase();
+        return projectRecords.filter((record) => (kindFilter === "all" || record.kind === kindFilter) && (!query || [record.title, record.prompt, record.model, record.taskId].filter(Boolean).join(" ").toLowerCase().includes(query)));
+    }, [kindFilter, keyword, projectRecords]);
+
+    const copyTaskId = async (taskId: string) => {
+        try {
+            await navigator.clipboard.writeText(taskId);
+            message.success(t("canvas.sidePanel.taskIdCopied"));
+        } catch {
+            message.error(t("canvas.sidePanel.copyFailed"));
+        }
+    };
+
+    return (
+        <div className="flex h-full flex-col">
+            <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
+                <span className="text-xs font-medium opacity-60">{t("canvas.sidePanel.historyRuns")}</span>
+                {filtered.length ? <span className="text-xs opacity-35">{filtered.length}</span> : null}
+                {projectRecords.length ? (
+                    <Popconfirm
+                        title={t("canvas.sidePanel.clearHistoryTitle")}
+                        okText={t("canvas.sidePanel.clearHistory")}
+                        cancelText={t("common.cancel")}
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => (clearProject(projectId), message.success(t("canvas.sidePanel.historyCleared")))}
+                    >
+                        <button type="button" className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium opacity-70 transition hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10">
+                            <Trash2 className="size-3.5" />
+                            {t("canvas.sidePanel.clearHistory")}
+                        </button>
+                    </Popconfirm>
+                ) : null}
+                <Select
+                    size="small"
+                    variant="borderless"
+                    className={cn("w-20", projectRecords.length ? "" : "ml-auto")}
+                    value={kindFilter}
+                    onChange={setKindFilter}
+                    options={HISTORY_FILTER_VALUES.map((value) => ({ value, label: value === "all" ? t("common.all") : t(`canvas.sidePanel.historyKind.${value}`) }))}
+                />
+            </div>
+            <div className="px-3 pb-2.5">
+                <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder={t("canvas.sidePanel.searchHistory")} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {filtered.length ? (
+                    <div className="space-y-1.5">
+                        {filtered.map((record) => {
+                            const Icon = HISTORY_KIND_ICON[record.kind] || FileText;
+                            const nodeAlive = nodeIds.has(record.nodeId);
+                            return (
+                                <div key={record.id} className="group relative flex items-start gap-2.5 rounded-lg px-2 py-2 transition hover:bg-black/5 dark:hover:bg-white/5">
+                                    <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md" style={{ background: theme.node.panel }}>
+                                        <Icon className="size-4 opacity-60" />
+                                    </span>
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="size-1.5 shrink-0 rounded-full" style={{ background: HISTORY_STATUS_COLOR[record.status] }} />
+                                            <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug">{record.title || t(`canvas.sidePanel.historyKind.${record.kind}`)}</span>
+                                        </div>
+                                        <div className="truncate text-xs leading-snug opacity-50">
+                                            {new Date(record.createdAt).toLocaleString(i18n.resolvedLanguage, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                            {record.model ? ` · ${record.model}` : ""}
+                                            {record.op ? ` · ${record.op}` : ""}
+                                        </div>
+                                        {record.taskId ? <div className="truncate text-[11px] leading-snug opacity-40">{record.taskId}</div> : null}
+                                        {record.status === "error" && record.error ? <div className="truncate text-[11px] leading-snug text-red-500 opacity-80">{record.error}</div> : null}
+                                    </div>
+                                    <div className="flex shrink-0 flex-col items-center gap-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => onFocusNode(record.nodeId)}
+                                            disabled={!nodeAlive}
+                                            className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25 dark:hover:bg-white/10"
+                                            aria-label={t("canvas.sidePanel.focusNode")}
+                                            title={nodeAlive ? t("canvas.sidePanel.focusNode") : t("canvas.sidePanel.historyNodeGone")}
+                                        >
+                                            <Crosshair className="size-3.5" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void copyTaskId(record.taskId || "")}
+                                            disabled={!record.taskId}
+                                            className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25 dark:hover:bg-white/10"
+                                            aria-label={t("canvas.sidePanel.copyTaskId")}
+                                            title={record.taskId ? t("canvas.sidePanel.copyTaskId") : t("canvas.sidePanel.noTaskId")}
+                                        >
+                                            <Copy className="size-3.5" />
+                                        </button>
+                                        <Popconfirm title={t("canvas.sidePanel.removeHistoryTitle")} okText={t("common.delete")} cancelText={t("common.cancel")} okButtonProps={{ danger: true }} onConfirm={() => removeRecords([record.id])}>
+                                            <button
+                                                type="button"
+                                                className="grid size-6 place-items-center rounded-md opacity-60 transition hover:bg-black/10 hover:text-red-500 hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-red-400"
+                                                aria-label={t("common.delete")}
+                                            >
+                                                <Trash2 className="size-3.5" />
+                                            </button>
+                                        </Popconfirm>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("canvas.sidePanel.noHistory")} className="pt-16" />
+                )}
+            </div>
+            <div className="border-t px-3 py-2 text-[11px] leading-snug opacity-45" style={{ borderColor: theme.toolbar.border }}>
+                {t("canvas.sidePanel.historyMetaOnly")}
             </div>
         </div>
     );

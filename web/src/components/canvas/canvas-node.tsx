@@ -727,7 +727,7 @@ function Model3dNodeContent({ node, theme }: NodeContentRendererProps) {
                 <span className="text-sm">{t(node.metadata?.status === "loading" ? "canvas.model3d.generating" : "canvas.model3d.empty")}</span>
             </div>
         );
-    return <CanvasModel3dViewer src={node.metadata.content} poster={node.metadata.model3dPreview} theme={theme} interactive={Boolean(node.metadata.interactive)} />;
+    return <CanvasModel3dViewer src={node.metadata.content} poster={node.metadata.model3dPreview} theme={theme} interactive={Boolean(node.metadata.interactive)} mimeType={node.metadata.mimeType} quad={node.metadata.model3dQuad === "true"} />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

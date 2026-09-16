@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { Boxes, Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Boxes, Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 import i18n from "@/i18n";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view" | "multiview";
+export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view" | "multiview" | "builtinMultiview";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -20,6 +20,7 @@ export type ImageToolHandlers = {
     onCopyPrompt: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
     onMultiview: (node: CanvasNodeData) => void;
+    onBuiltinMultiview: (node: CanvasNodeData) => void;
 };
 
 export type ImageToolDefinition = {
@@ -37,7 +38,8 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v7";
+// Bumped to v8 so the multiview tool, now visible by default, also reaches users who had saved a tool set.
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v8";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download"];
 
@@ -100,9 +102,17 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         run: (node, handlers) => handlers.onSplit(node),
     },
     {
+        // Drives the configured image model with four view prompts, so it needs no Tripo channel.
+        id: "builtinMultiview",
+        defaultVisible: true,
+        label: () => i18n.t("canvas.imageTools.builtinMultiview"),
+        title: () => i18n.t("canvas.imageTools.builtinMultiviewTitle"),
+        icon: () => <Images className="size-4" />,
+        run: (node, handlers) => handlers.onBuiltinMultiview(node),
+    },
+    {
         id: "multiview",
-        // Off by default: unlike the other image tools this calls Tripo and consumes credits.
-        defaultVisible: false,
+        defaultVisible: true,
         label: () => i18n.t("canvas.imageTools.multiview"),
         title: () => i18n.t("canvas.imageTools.multiviewTitle"),
         icon: () => <Boxes className="size-4" />,

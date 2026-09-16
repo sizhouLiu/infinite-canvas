@@ -32,7 +32,7 @@ import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { uploadImage } from "@/services/image-storage";
+import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { dataUrlToFile, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -68,13 +68,17 @@ import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useGenerationHistoryStore, type GenerationHistoryInput } from "@/stores/canvas/use-generation-history-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { BUILTIN_MULTIVIEW_VIEWS, multiviewDelay, multiviewPrompt, retryAfterSeconds } from "@/lib/canvas/canvas-multiview-prompts";
+import { splitModel3dParts } from "@/lib/canvas/canvas-model3d-parts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, buildModel3dGenerationMetadata, createCanvasNode, imageMetadata, model3dMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, getGroupWrapRect, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
+    assignMultiviewViews,
     audioExtension,
     buildAngleLabel,
     buildAnglePrompt,
@@ -85,7 +89,6 @@ import {
     getInputSummary,
     hasResumableModel3dConvertTask,
     hasResumableModel3dTask,
-    multiviewViewForReference,
     hasResumableVideoTask,
     hydrateAssistantImages,
     hydrateCanvasImages,
@@ -230,6 +233,12 @@ function InfiniteCanvasPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const startHistory = useGenerationHistoryStore((state) => state.startRecord);
+    const updateHistory = useGenerationHistoryStore((state) => state.updateRecord);
+    const finishHistory = useGenerationHistoryStore((state) => state.finishRecord);
+    const failHistory = useGenerationHistoryStore((state) => state.failRecord);
+    const resolveHistoryByTaskId = useGenerationHistoryStore((state) => state.resolveByTaskId);
+    const clearProjectHistory = useGenerationHistoryStore((state) => state.clearProject);
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const createProject = useCanvasStore((state) => state.createProject);
@@ -321,6 +330,27 @@ function InfiniteCanvasPage() {
         [cleanupAssetImages],
     );
 
+    /**
+     * Open a history record for one generation and hand back the three ways it can end. The record is written
+     * before the request goes out so a task id — the only thing that can find a run again on the provider side —
+     * is kept even if the page is closed mid-run or the node is deleted afterwards.
+     */
+    const trackGeneration = useCallback(
+        (input: Omit<GenerationHistoryInput, "projectId">) => {
+            const id = startHistory({ ...input, projectId });
+            return {
+                id,
+                task: (taskId: string) => updateHistory(id, { taskId }),
+                done: (patch?: Parameters<typeof finishHistory>[1]) => finishHistory(id, patch),
+                // Called first in every catch, before the cancel guard returns: a record left "running" would
+                // claim a run is still in flight forever, so a canceled run closes as canceled instead.
+                fail: (error: unknown) => failHistory(id, isGenerationCanceled(error) ? t("common.requestCanceled") : error instanceof Error ? error.message : t("canvas.projectPage.generationFailed")),
+                cancel: () => failHistory(id, t("common.requestCanceled")),
+            };
+        },
+        [failHistory, finishHistory, projectId, startHistory, t, updateHistory],
+    );
+
     const startGenerationRequest = useCallback((targetNodeId: string, originNodeId: string, runningId = originNodeId, controller = new AbortController()) => {
         const previous = generationRequestsRef.current.get(targetNodeId);
         if (previous?.controller !== controller) previous?.controller.abort();
@@ -335,14 +365,22 @@ function InfiniteCanvasPage() {
 
     const completeVideoNodeTask = useCallback(
         async (nodeId: string, config: Parameters<typeof buildGenerationConfig>[0], prompt: string, images: Parameters<typeof createVideoGenerationTask>[2], signal: AbortSignal, extra: CanvasNodeData["metadata"] = {}, videos: ReferenceVideo[] = [], audios: ReferenceAudio[] = []) => {
-            const task = await createVideoGenerationTask(config, prompt, images, { signal, videos, audios });
-            if (task.provider !== "plugin") {
-                setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: task.provider === "gemini" ? "gemini" : "openai", model: config.model } } : item)));
+            const history = trackGeneration({ nodeId, kind: "video", title: prompt.slice(0, 40) || t("canvas.projectPage.canvasVideo"), prompt, model: config.model });
+            try {
+                const task = await createVideoGenerationTask(config, prompt, images, { signal, videos, audios });
+                history.task(task.id);
+                if (task.provider !== "plugin") {
+                    setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: task.provider === "gemini" ? "gemini" : "openai", model: config.model } } : item)));
+                }
+                const video = await storeGeneratedVideo(await waitForVideoGenerationTask(config, task, { signal }));
+                setNodes((prev) => prev.map((item) => (item.id === nodeId ? applyGeneratedVideo(item, video, { prompt, model: config.model, ...extra }) : item)));
+                history.done({ storageKey: video.storageKey, mimeType: video.mimeType });
+            } catch (error) {
+                history.fail(error);
+                throw error;
             }
-            const video = await storeGeneratedVideo(await waitForVideoGenerationTask(config, task, { signal }));
-            setNodes((prev) => prev.map((item) => (item.id === nodeId ? applyGeneratedVideo(item, video, { prompt, model: config.model, ...extra }) : item)));
         },
-        [],
+        [t, trackGeneration],
     );
 
     const pollVideoNodeTask = useCallback(
@@ -365,6 +403,7 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
                 controller = startGenerationRequest(node.id, node.id, node.id);
                 const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, { id: taskId, provider: node.metadata?.videoTaskProvider === "gemini" ? "gemini" : "openai", model: generationConfig.model }, { signal: controller.signal }));
+                resolveHistoryByTaskId(taskId, { status: "success", storageKey: video.storageKey, mimeType: video.mimeType });
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === node.id
@@ -384,6 +423,7 @@ function InfiniteCanvasPage() {
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                resolveHistoryByTaskId(taskId, { status: "error", error: errorDetails });
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -408,7 +448,7 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
     );
 
     const pollModel3dNodeTask = useCallback(
@@ -432,10 +472,12 @@ function InfiniteCanvasPage() {
                 controller = startGenerationRequest(node.id, node.id, node.id);
                 const result = await waitForModel3dTask(generationConfig, { id: taskId, model: generationConfig.model }, { signal: controller.signal });
                 const [stored, preview] = await Promise.all([storeGeneratedModel3d(result), result.previewUrl ? storeModel3dPreview(result.previewUrl) : null]);
+                resolveHistoryByTaskId(taskId, { status: "success", storageKey: stored.storageKey, previewKey: preview?.storageKey, mimeType: stored.mimeType });
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...model3dMetadata(stored, preview), model: generationConfig.model } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                resolveHistoryByTaskId(taskId, { status: "error", error: errorDetails });
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -461,51 +503,110 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, resolveHistoryByTaskId, startGenerationRequest, t],
     );
 
     /**
      * Generate the four multiview images from one image node, or re-edit an existing multiview set.
      * The views land as four image nodes in a 2x2 grid, each tagged with its angle so a later
      * multiview-to-3D run maps them back to front/left/back/right instead of guessing from order.
+     *
+     * `source: "builtin"` drives the configured image model with four parallel view prompts instead of
+     * Tripo's dedicated endpoint, so multiview works on any image provider and without Tripo credits.
      */
     const runMultiviewImageOp = useCallback(
-        async (sourceNode: CanvasNodeData, prompts?: Array<{ prompt: string; view: MultiviewView }>) => {
+        async (sourceNode: CanvasNodeData, prompts?: Array<{ prompt: string; view: MultiviewView }>, source: "tripo" | "builtin" = "tripo") => {
             if (!sourceNode.metadata?.content) return;
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, "model3d");
+            // The built-in path is an ordinary image edit, so it runs on the image model and its channel.
+            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, source === "builtin" ? "image" : "model3d");
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
 
             const controller = startGenerationRequest(sourceNode.id, sourceNode.id, sourceNode.id);
+            const history = trackGeneration({ nodeId: sourceNode.id, kind: "multiview", title: t("canvas.projectPage.multiviewGroupTitle"), model: generationConfig.model, op: source });
             setRunningNodeId(sourceNode.id);
             setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
             try {
-                // Editing chains off the task that produced the set; generating uploads the source image.
-                const result = prompts?.length
-                    ? await requestEditMultiview(generationConfig, String(sourceNode.metadata.multiviewTaskId), prompts, { signal: controller.signal })
-                    : await requestImageToMultiview(generationConfig, await uploadModel3dImage(generationConfig, dataUrlToFile(sourceNodeReferenceImages(sourceNode)[0]), { signal: controller.signal }), { signal: controller.signal });
-
                 const gap = 16;
                 const startX = sourceNode.position.x + sourceNode.width + 96;
-                const viewNodes = await Promise.all(
-                    result.views.map(async (item, index) => {
-                        const image = await uploadImage(item.url);
-                        return {
-                            id: nanoid(),
-                            type: CanvasNodeType.Image,
-                            title: t(`canvas.model3dOps.views.${item.view}`),
-                            position: { x: startX + (index % 2) * (sourceNode.width / 2 + gap), y: sourceNode.position.y + Math.floor(index / 2) * (sourceNode.height / 2 + gap) },
-                            width: sourceNode.width / 2,
-                            height: sourceNode.height / 2,
-                            metadata: { ...imageMetadata(image), multiviewView: item.view, multiviewTaskId: result.taskId },
-                        } satisfies CanvasNodeData;
-                    }),
-                );
-                setNodes((prev) => [...prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), ...viewNodes]);
+                const placeView = (image: UploadedImage, view: MultiviewView, index: number, taskId?: string): CanvasNodeData =>
+                    ({
+                        id: nanoid(),
+                        type: CanvasNodeType.Image,
+                        title: t(`canvas.model3dOps.views.${view}`),
+                        position: { x: startX + (index % 2) * (sourceNode.width / 2 + gap), y: sourceNode.position.y + Math.floor(index / 2) * (sourceNode.height / 2 + gap) },
+                        width: sourceNode.width / 2,
+                        height: sourceNode.height / 2,
+                        // Only a Tripo set carries a task id; edit-multiview chains off it, so a built-in
+                        // set deliberately has none and offers plain image editing instead.
+                        metadata: { ...imageMetadata(image), multiviewView: view, ...(taskId ? { multiviewTaskId: taskId } : {}) },
+                    }) satisfies CanvasNodeData;
+
+                let viewNodes: CanvasNodeData[];
+                if (source === "builtin") {
+                    const references = sourceNodeReferenceImages(sourceNode);
+                    // One request per view, each against the source image, so no view inherits another's
+                    // mistakes. Run one at a time: image providers commonly allow a single concurrent
+                    // generation, and firing all four at once trips the limit instead of being faster.
+                    // A view that hits the limit anyway is retried once after the delay the provider asks for.
+                    viewNodes = [];
+                    let failed = 0;
+                    let lastError: unknown;
+                    for (const [index, view] of BUILTIN_MULTIVIEW_VIEWS.entries()) {
+                        const runView = () => requestEdit({ ...generationConfig, count: "1" }, multiviewPrompt(view), references, { signal: controller.signal }).then((items) => items[0]);
+                        try {
+                            let image;
+                            try {
+                                image = await runView();
+                            } catch (error) {
+                                const wait = retryAfterSeconds(error);
+                                if (wait === null) throw error;
+                                message.info(t("canvas.projectPage.multiviewRateLimited", { seconds: wait }));
+                                await multiviewDelay(wait * 1000, controller.signal);
+                                image = await runView();
+                            }
+                            if (!image) throw new Error(t("canvas.projectPage.generationFailed"));
+                            viewNodes.push(placeView(await uploadImage(image.dataUrl, { signal: controller.signal }), view, index));
+                        } catch (error) {
+                            // A cancel must stop the whole run; a single view's failure must not lose the rest.
+                            if (isGenerationCanceled(error)) throw error;
+                            failed++;
+                            lastError = error;
+                        }
+                    }
+                    if (!viewNodes.length) throw lastError;
+                    if (failed) message.warning(t("canvas.projectPage.multiviewPartialFailure", { count: failed }));
+                } else {
+                    // Editing chains off the task that produced the set; generating uploads the source image.
+                    const result = prompts?.length
+                        ? await requestEditMultiview(generationConfig, String(sourceNode.metadata.multiviewTaskId), prompts, { signal: controller.signal })
+                        : await requestImageToMultiview(generationConfig, await uploadModel3dImage(generationConfig, dataUrlToFile(sourceNodeReferenceImages(sourceNode)[0]), { signal: controller.signal }), { signal: controller.signal });
+                    history.task(result.taskId);
+                    viewNodes = await Promise.all(result.views.map(async (item, index) => placeView(await uploadImage(item.url), item.view, index, result.taskId)));
+                }
+
+                // Group the views so the set moves as one unit and reads as one result, and so connecting the
+                // group to a 3D node feeds every view at once. Built from the same wrap rect manual grouping
+                // uses, but without applyGroupSelection, which works off the current selection — these nodes
+                // were just created and nothing is selected. A lone surviving view is left ungrouped, matching
+                // the two-member minimum manual grouping enforces.
+                const groupNode: CanvasNodeData | null =
+                    viewNodes.length > 1
+                        ? (() => {
+                              const rect = getGroupWrapRect(viewNodes);
+                              const created = createCanvasNode(CanvasNodeType.Group, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+                              return { ...created, title: t("canvas.projectPage.multiviewGroupTitle"), position: { x: rect.x, y: rect.y }, width: rect.width, height: rect.height };
+                          })()
+                        : null;
+                if (groupNode) viewNodes = viewNodes.map((node) => ({ ...node, metadata: { ...node.metadata, groupId: groupNode.id } }));
+                // The group is placed before its members so it paints underneath them rather than covering them.
+                setNodes((prev) => [...prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), ...(groupNode ? [groupNode] : []), ...viewNodes]);
                 setConnections((prev) => [...prev, ...viewNodes.map((child) => ({ id: nanoid(), fromNodeId: sourceNode.id, toNodeId: child.id }))]);
+                history.done({ nodeId: groupNode?.id || viewNodes[0].id, storageKey: viewNodes[0].metadata?.storageKey, mimeType: viewNodes[0].metadata?.mimeType });
             } catch (error) {
+                history.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
@@ -515,7 +616,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId((current) => (current === sourceNode.id ? null : current));
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     /**
@@ -533,17 +634,56 @@ function InfiniteCanvasPage() {
             try {
                 const result = await waitForModel3dOp(generationConfig, taskId, { signal: controller.signal });
                 const stored = await storeModel3dOpResult(result.modelUrl, "model3d-converted");
+                resolveHistoryByTaskId(taskId, { status: "success", storageKey: stored.storageKey, mimeType: stored.mimeType });
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedMime: stored.mimeType } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
+                resolveHistoryByTaskId(taskId, { status: "error", error: error instanceof Error ? error.message : t("canvas.projectPage.generationFailed") });
                 // Keep the task id unless Tripo failed terminally, so a timeout can still be retried.
                 if (isModel3dTaskFailed(error)) setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, model3dConvertTaskId: undefined, model3dConvertedFormat: undefined } } : item)));
             } finally {
                 finishGenerationRequest(node.id, controller);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, startGenerationRequest],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, resolveHistoryByTaskId, startGenerationRequest, t],
     );
+
+    /**
+     * Split a segmented model into one 3D node per part. Tripo returns the segmentation as a single glb whose
+     * meshes carry the part names, so the split runs locally: each part is re-exported and stored like any
+     * other model, then laid out in a column to the right of the segmented node.
+     *
+     * Returns an empty array when the model holds fewer than two named parts, which the caller reports rather
+     * than creating a lone node that just duplicates the whole.
+     */
+    const createModel3dPartNodes = useCallback(async (stored: UploadedFile, sourceId: string, signal?: AbortSignal): Promise<CanvasNodeData[]> => {
+        const sourceNode = nodesRef.current.find((node) => node.id === sourceId);
+        if (!sourceNode) return [];
+        const parts = await splitModel3dParts(stored.url, signal);
+        if (!parts?.length) return [];
+
+        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Model3d];
+        const width = spec.width * 0.6;
+        const height = spec.height * 0.6;
+        const gap = 16;
+        const startX = sourceNode.position.x + (sourceNode.width || spec.width) + 96;
+        return Promise.all(
+            parts.map(async (part, index) => {
+                const partFile = await uploadMediaFile(part.blob, "model3d-part");
+                return {
+                    id: nanoid(),
+                    type: CanvasNodeType.Model3d,
+                    title: part.name,
+                    position: { x: startX, y: sourceNode.position.y + index * (height + gap) },
+                    width,
+                    height,
+                    // No model3dSourceTaskId: a locally split part has no Tripo task of its own, so a
+                    // follow-up operation uploads its file instead of chaining off a task id.
+                    metadata: { ...model3dMetadata(partFile), prompt: part.name },
+                } satisfies CanvasNodeData;
+            }),
+        );
+    }, []);
 
     /**
      * Run a follow-up Tripo operation on an existing 3D node. Conversion writes its artifact back onto the
@@ -578,6 +718,7 @@ function InfiniteCanvasPage() {
             }
 
             const controller = startGenerationRequest(targetId, sourceNode.id, sourceNode.id);
+            const history = trackGeneration({ nodeId: targetId, kind: "model3dOp", title: model3dOpLabel(op), model: generationConfig.model, op });
             setRunningNodeId(targetId);
             try {
                 const source = { taskId: sourceNode.metadata?.model3dSourceTaskId, storageKey: sourceNode.metadata?.storageKey, mimeType: sourceNode.metadata?.mimeType };
@@ -589,7 +730,10 @@ function InfiniteCanvasPage() {
                 }
 
                 const taskField = writesBack ? "model3dConvertTaskId" : "model3dTaskId";
-                const onTaskCreated = (taskId: string) => setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, [taskField]: taskId } } : node)));
+                const onTaskCreated = (taskId: string) => {
+                    history.task(taskId);
+                    setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, [taskField]: taskId } } : node)));
+                };
                 const options = { signal: controller.signal, onTaskCreated };
                 const faceLimit = Number(params.faceLimit) || undefined;
                 let result;
@@ -617,11 +761,25 @@ function InfiniteCanvasPage() {
                                 : node,
                         ),
                     );
+                    history.done({ storageKey: stored.storageKey, mimeType: stored.mimeType });
                     message.success(t("canvas.model3dOps.convertDone", { ext: convertExtension(String(params.format)).toUpperCase() }));
                     return;
                 }
 
                 const [stored, preview] = await Promise.all([storeModel3dOpResult(result.modelUrl), result.previewUrl ? storeModel3dPreview(result.previewUrl) : null]);
+
+                // Segmentation asked to be split: the single glb Tripo returns is broken into one node per
+                // named part, laid out in a column beside the segmented model and wired from it. The segmented
+                // whole is kept on its own node, so nothing is lost if the split finds only one part.
+                if (op === "segment" && params.splitParts) {
+                    const partNodes = await createModel3dPartNodes(stored, targetId, controller.signal);
+                    if (partNodes.length) {
+                        setNodes((prev) => [...prev, ...partNodes]);
+                        setConnections((prev) => [...prev, ...partNodes.map((part) => ({ id: nanoid(), fromNodeId: targetId, toNodeId: part.id }))]);
+                        message.success(t("canvas.model3dOps.splitDone", { count: partNodes.length }));
+                    } else message.info(t("canvas.model3dOps.splitNoParts"));
+                }
+
                 setNodes((prev) =>
                     prev.map((node) =>
                         node.id === targetId
@@ -634,13 +792,18 @@ function InfiniteCanvasPage() {
                                       // Recorded so the next operation in a chain can reuse this task server-side.
                                       model3dSourceTaskId: result.taskId,
                                       model3dTaskKind: op,
+                                      // Decimate can re-emit quads, so the result node records its own topology
+                                      // rather than inheriting the source node's.
+                                      ...(op === "decimate" ? { model3dQuad: params.quad ? "true" : "false" } : {}),
                                       ...(op === "rig" ? { model3dRigType: String(params.rigType) } : {}),
                                   },
                               }
                             : node,
                     ),
                 );
+                history.done({ storageKey: stored.storageKey, previewKey: preview?.storageKey, mimeType: stored.mimeType });
             } catch (error) {
+                history.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
@@ -665,7 +828,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId((current) => (current === targetId ? null : current));
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [createModel3dPartNodes, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
@@ -1443,9 +1606,11 @@ function InfiniteCanvasPage() {
 
     const deleteCurrentProject = useCallback(() => {
         deleteProjects([projectId]);
+        // The records point at nodes that no longer exist, so they go with the project.
+        clearProjectHistory(projectId);
         cleanupAssetImages();
         navigate("/canvas");
-    }, [cleanupAssetImages, deleteProjects, navigate, projectId]);
+    }, [cleanupAssetImages, clearProjectHistory, deleteProjects, navigate, projectId]);
 
     const exportCurrentProject = useCallback(async () => {
         const project = useCanvasStore.getState().projects.find((item) => item.id === projectId);
@@ -2301,12 +2466,15 @@ function InfiniteCanvasPage() {
             if (!payload.generate) return;
             setRunningNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
+            const history = trackGeneration({ nodeId: childId, kind: "image", title: userPrompt.slice(0, 40) || t("canvas.projectPage.maskResult"), prompt, model: generationConfig.model, op: "mask" });
             try {
                 const image = await requestEdit(generationConfig, prompt, references, { signal: controller.signal }).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                history.done({ storageKey: uploaded.storageKey, mimeType: uploaded.mimeType });
             } catch (error) {
+                history.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.maskFailed");
                 message.error(errorDetails);
@@ -2316,7 +2484,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -2377,6 +2545,7 @@ function InfiniteCanvasPage() {
             setSelectedNodeIds(new Set([childId]));
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
+            const history = trackGeneration({ nodeId: childId, kind: "image", title, prompt, model: generationConfig.model, op: "angle" });
             try {
                 const image = await requestEdit(
                     generationConfig,
@@ -2387,7 +2556,9 @@ function InfiniteCanvasPage() {
                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                history.done({ storageKey: uploaded.storageKey, mimeType: uploaded.mimeType });
             } catch (error) {
+                history.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
@@ -2396,7 +2567,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest, t],
+        [effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2599,6 +2770,7 @@ function InfiniteCanvasPage() {
                 if (!scene) return;
                 setRunningNodeId(nodeId);
                 const controller = startGenerationRequest(nodeId, nodeId, nodeId);
+                const history = trackGeneration({ nodeId, kind: "image", title: scene.slice(0, 40) || sourceNode.title, prompt: scene, model: generationConfig.model });
                 setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: scene, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
                 try {
                     const fullPrompt = (builtinPanel.promptPrefix || "") + scene;
@@ -2611,8 +2783,10 @@ function InfiniteCanvasPage() {
                     setNodes((prev) =>
                         prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded), prompt: scene, model: generationConfig.model, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
                     );
+                    history.done({ storageKey: uploaded.storageKey, mimeType: uploaded.mimeType });
                     setDialogNodeId(null);
                 } catch (error) {
+                    history.fail(error);
                     if (!isGenerationCanceled(error)) {
                         const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                         message.error(errorDetails);
@@ -2644,6 +2818,9 @@ function InfiniteCanvasPage() {
                 return;
             }
             let pendingChildIds: string[] = [];
+            // Opened by whichever branch runs below, so the shared catch can close that same record. The text
+            // branch leaves it unset: text generation has neither a task id nor a stored file to point back to.
+            let history: ReturnType<typeof trackGeneration> | undefined;
             if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
@@ -2723,9 +2900,12 @@ function InfiniteCanvasPage() {
                     setDialogNodeId(nodeId);
 
                     const controller = rootId === nodeId ? runController : startGenerationRequest(rootId, nodeId, nodeId, runController);
+                    history = trackGeneration({ nodeId: rootId, kind: "image", title: effectivePrompt.slice(0, 40) || rootNode.title, prompt: effectivePrompt, model: generationConfig.model });
                     let hasSuccess = false;
                     let hasFailure = false;
                     let firstError = "";
+                    // One record covers the whole batch, pointing at the first image that came back.
+                    let firstImage: CanvasNodeImage | undefined;
                     await Promise.all(
                         imageIds.map(async (imageId) => {
                             try {
@@ -2760,6 +2940,7 @@ function InfiniteCanvasPage() {
                                     }),
                                 );
                                 hasSuccess = true;
+                                if (!firstImage) firstImage = item;
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
@@ -2774,9 +2955,12 @@ function InfiniteCanvasPage() {
                     );
                     if (rootId !== nodeId) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
+                        history.cancel();
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
                         return;
                     }
+                    if (hasSuccess) history.done({ storageKey: firstImage?.storageKey, mimeType: firstImage?.mimeType });
+                    else history.fail(new Error(firstError || t("canvas.projectPage.allFailed")));
                     if (hasFailure) {
                         message.error(hasSuccess ? t("canvas.projectPage.partialFailed") : firstError || t("canvas.projectPage.generationFailed"));
                     }
@@ -2863,6 +3047,7 @@ function InfiniteCanvasPage() {
                     );
                     if (!isEmptyModel3dNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: model3dId }]);
                     const controller = startGenerationRequest(model3dId, nodeId, nodeId, runController);
+                    history = trackGeneration({ nodeId: model3dId, kind: "model3d", title: effectivePrompt.slice(0, 40) || model3dNode.title, prompt: effectivePrompt, model: generationConfig.model });
                     try {
                         // One upstream image runs image-to-model; several run multiview-to-model. Tripo takes at most
                         // four views, so extra images are dropped with a warning rather than silently ignored.
@@ -2872,11 +3057,15 @@ function InfiniteCanvasPage() {
                         const usable = multiview ? references.slice(0, MULTIVIEW_VIEWS.length) : references;
                         // Tripo needs an uploaded token rather than a local blob, so every view is uploaded first.
                         const tokens = await Promise.all(usable.map((image) => uploadModel3dImage(generationConfig, dataUrlToFile(image), { signal: controller.signal })));
-                        const onTaskCreated = (taskId: string) => setNodes((prev) => prev.map((node) => (node.id === model3dId ? { ...node, metadata: { ...node.metadata, model3dTaskId: taskId } } : node)));
+                        const onTaskCreated = (taskId: string) => {
+                            history?.task(taskId);
+                            setNodes((prev) => prev.map((node) => (node.id === model3dId ? { ...node, metadata: { ...node.metadata, model3dTaskId: taskId } } : node)));
+                        };
 
                         let result: Model3dResult & { taskId: string };
                         if (multiview) {
-                            const views = tokens.map((input, index) => ({ view: multiviewViewForReference(usable[index], nodesRef.current, index), input }));
+                            const assigned = assignMultiviewViews(usable, nodesRef.current);
+                            const views = tokens.map((input, index) => ({ view: assigned[index], input }));
                             const opResult = await requestMultiviewToModel(generationConfig, views, { model: generationConfig.model, ...model3dRequestOptions(generationConfig) }, { signal: controller.signal, onTaskCreated });
                             result = { ...opResult, mimeType: "model/gltf-binary" };
                         } else {
@@ -2904,6 +3093,7 @@ function InfiniteCanvasPage() {
                                     : node,
                             ),
                         );
+                        history.done({ storageKey: stored.storageKey, previewKey: preview?.storageKey, mimeType: stored.mimeType });
                     } finally {
                         finishGenerationRequest(model3dId, controller);
                     }
@@ -2932,9 +3122,11 @@ function InfiniteCanvasPage() {
                     );
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
+                    history = trackGeneration({ nodeId: audioId, kind: "audio", title: effectivePrompt.slice(0, 40) || audioNode.title, prompt: effectivePrompt, model: generationConfig.model });
                     try {
                         const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
                         setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        history.done({ storageKey: audio.storageKey, mimeType: audio.mimeType });
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
@@ -3056,6 +3248,7 @@ function InfiniteCanvasPage() {
                     }),
                 );
             } catch (error) {
+                history?.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
@@ -3081,7 +3274,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3114,14 +3307,19 @@ function InfiniteCanvasPage() {
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
-            if (!prompt) {
-                message.warning(t("canvas.projectPage.retryPromptMissing"));
-                return;
-            }
             const generationType = savedImageMetadata?.generationType;
             const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
             const retryReferenceImages =
                 hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(sourceNode)) : [];
+            // A prompt is only required where the request itself needs one, matching the generation path: text
+            // and audio always, and an image or 3D model with nothing to edit. An image-to-3D or image-edit run
+            // carries its instruction in the reference images, so a prompt-free generation must stay retryable —
+            // refusing every empty prompt here left such a failed node with no way back.
+            const promptRequired = node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Audio || !useReferenceImages;
+            if (!prompt && promptRequired) {
+                message.warning(t("canvas.projectPage.retryPromptMissing"));
+                return;
+            }
             if (useReferenceImages && !retryReferenceImages) {
                 message.error(t("canvas.projectPage.referenceMissing"));
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: item.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: item.metadata?.content ? undefined : t("canvas.projectPage.referenceMissing"), images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails: t("canvas.projectPage.referenceMissing") } : image)) } } : item)));
@@ -3132,6 +3330,9 @@ function InfiniteCanvasPage() {
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_LOADING, errorDetails: undefined } : image)) } } : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
+            // Text retries record nothing (no task id, no file), and a video retry is recorded inside
+            // completeVideoNodeTask, so only the image and audio branches below open a record here.
+            let history: ReturnType<typeof trackGeneration> | undefined;
 
             try {
                 if (node.type === CanvasNodeType.Text) {
@@ -3161,11 +3362,14 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
+                    history = trackGeneration({ nodeId: node.id, kind: "audio", title: prompt.slice(0, 40) || node.title, prompt, model: generationConfig.model, op: "retry" });
                     const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal }), generationConfig.audioFormat);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
+                    history.done({ storageKey: audio.storageKey, mimeType: audio.mimeType });
                     return;
                 }
 
+                history = trackGeneration({ nodeId: node.id, kind: "image", title: prompt.slice(0, 40) || node.title, prompt, model: generationConfig.model, op: "retry" });
                 const image = useReferenceImages
                     ? await requestEdit(generationConfig, prompt, retryImages, { signal: controller.signal }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
@@ -3213,7 +3417,9 @@ function InfiniteCanvasPage() {
                         };
                     }),
                 );
+                history.done({ storageKey: uploadedImage.storageKey, mimeType: uploadedImage.mimeType });
             } catch (error) {
+                history?.fail(error);
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
@@ -3238,7 +3444,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t, trackGeneration],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
@@ -3384,6 +3590,13 @@ function InfiniteCanvasPage() {
                 void generateNodeRef.current?.(node.id, "text", node.metadata?.prompt || "");
                 return;
             }
+            // A failed 3D node has no branch in handleRetryNode and would fall through to the image request,
+            // producing an image on a 3D node. The 3D generation path handles it correctly instead: the node is
+            // empty, so it writes the result back onto itself rather than creating another node.
+            if (node.type === CanvasNodeType.Model3d) {
+                void generateNodeRef.current?.(node.id, "model3d", node.metadata?.prompt || "");
+                return;
+            }
             void handleRetryNode(node);
         },
         [handleRetryNode],
@@ -3457,7 +3670,7 @@ function InfiniteCanvasPage() {
 
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
-            <CanvasSidePanel nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={focusNode} onPreviewNode={setPreviewNodeId} onInsertAsset={handleAssetInsert} />
+            <CanvasSidePanel projectId={projectId} nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={focusNode} onPreviewNode={setPreviewNodeId} onInsertAsset={handleAssetInsert} />
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
                     title={currentProject?.title || t("canvas.projectPage.untitledCanvas")}
@@ -3621,6 +3834,7 @@ function InfiniteCanvasPage() {
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onDownload={downloadNodeImage}
                     onMultiview={(node) => (node.metadata?.multiviewTaskId ? setMultiviewEditNodeId(node.id) : void runMultiviewImageOp(node))}
+                    onBuiltinMultiview={(node) => void runMultiviewImageOp(node, undefined, "builtin")}
                     onModel3dOp={(node, op) => setModel3dOpTarget({ nodeId: node.id, op })}
                     onDownloadConvertedModel3d={(node) => void downloadConvertedModel3d(node)}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
@@ -3632,7 +3846,7 @@ function InfiniteCanvasPage() {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={handleNodeViewImage}
                     onReversePrompt={createImageReversePromptNodes}
-                    onRetry={(node) => void handleRetryNode(node)}
+                    onRetry={handleNodeRetry}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                     onUngroup={(node) => ungroupSelection(new Set([node.id]))}
@@ -3773,7 +3987,15 @@ function InfiniteCanvasPage() {
                         move/interact toggle does not apply inside the modal. */}
                     {previewModel3dNode?.metadata?.content ? (
                         <div style={{ height: "72vh" }}>
-                            <CanvasModel3dViewer src={previewModel3dNode.metadata.content} poster={previewModel3dNode.metadata.model3dPreview} theme={theme} interactive />
+                            <CanvasModel3dViewer
+                                src={previewModel3dNode.metadata.content}
+                                poster={previewModel3dNode.metadata.model3dPreview}
+                                theme={theme}
+                                interactive
+                                mimeType={previewModel3dNode.metadata.mimeType}
+                                quad={previewModel3dNode.metadata.model3dQuad === "true"}
+                                showControls
+                            />
                         </div>
                     ) : null}
                 </Modal>

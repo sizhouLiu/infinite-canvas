@@ -1,10 +1,12 @@
 import axios from "axios";
 
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { resolveModelRequestConfig, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionName, resolveModelRequestConfig, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import {
     apiText,
     assertTripoProxy,
+    detectModel3dMime,
+    model3dMimeFromUrl,
     TRIPO_FAILED_STATES,
     TRIPO_POLL_INTERVAL_MS,
     TRIPO_POLL_TIMEOUT_MS,
@@ -126,7 +128,10 @@ async function waitForOpTask(config: AiConfig, taskId: string, ready: (output: T
 /** Shared runner for the eight operations whose output is a new model file. */
 async function runModelOp(config: AiConfig, path: string, body: Record<string, unknown>, options?: Model3dOpOptions): Promise<Model3dOpResult> {
     const requestConfig = opRequestConfig(config);
-    const taskId = await createOpTask(requestConfig, path, body, options);
+    // The model picker stores "channelId::model" so two channels can offer the same model name. Tripo must
+    // receive the bare name or it answers 1004 with the composite echoed back, so it is stripped here rather
+    // than at each call site: every endpoint below takes its model from either a preset enum or the picker.
+    const taskId = await createOpTask(requestConfig, path, typeof body.model === "string" ? { ...body, model: modelOptionName(body.model) } : body, options);
     options?.onTaskCreated?.(taskId);
     const output = await waitForOpTask(requestConfig, taskId, (value) => Boolean(value.model_url), options);
     return { taskId, modelUrl: output.model_url || "", previewUrl: output.rendered_image_url };
@@ -335,5 +340,8 @@ export async function storeModel3dOpResult(url: string, prefix = "model3d"): Pro
     const response = await fetch(withLocalProxy(url));
     if (!response.ok) throw new Error(apiText("model3dDownloadFailed"));
     const blob = await response.blob();
-    return uploadMediaFile(blob, prefix);
+    // Rig and retarget can emit FBX, and convert emits six non-glb formats, so the stored blob carries the
+    // detected type — the viewer chooses its loader from it and the download gets a truthful mime.
+    const mimeType = await detectModel3dMime(blob, model3dMimeFromUrl(url, blob.type || "model/gltf-binary"));
+    return { ...(await uploadMediaFile(new Blob([blob], { type: mimeType }), prefix)), mimeType };
 }

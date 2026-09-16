@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
+import { useGenerationHistoryStore } from "@/stores/canvas/use-generation-history-store";
 
 export function CanvasDeleteProjectsDialog() {
     const { t } = useTranslation();
@@ -12,8 +13,11 @@ export function CanvasDeleteProjectsDialog() {
     const removeSelectedIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
+    const clearProjectHistory = useGenerationHistoryStore((state) => state.clearProject);
     const confirm = () => {
         deleteProjects(ids);
+        // Generation records belong to their canvas, so deleting the canvas drops them too.
+        ids.forEach((id) => clearProjectHistory(id));
         cleanupImages();
         removeSelectedIds(ids);
         setDeleteIds([]);
