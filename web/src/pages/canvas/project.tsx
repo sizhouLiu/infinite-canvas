@@ -33,7 +33,7 @@ import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { uploadImage, type UploadedImage } from "@/services/image-storage";
+import { imageToDataUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { dataUrlToFile, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -71,6 +71,7 @@ import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { useGenerationHistoryStore, type GenerationHistoryInput } from "@/stores/canvas/use-generation-history-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
@@ -251,6 +252,7 @@ function InfiniteCanvasPage() {
     const clearProjectHistory = useGenerationHistoryStore((state) => state.clearProject);
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
     const hydrated = useCanvasStore((state) => state.hydrated);
+    const deactivateModel3dNode = useCanvasUiStore((state) => state.deactivateModel3dNode);
     const createProject = useCanvasStore((state) => state.createProject);
     const openProject = useCanvasStore((state) => state.openProject);
     const updateProject = useCanvasStore((state) => state.updateProject);
@@ -603,9 +605,16 @@ function InfiniteCanvasPage() {
                     if (failed) message.warning(t("canvas.projectPage.multiviewPartialFailure", { count: failed }));
                 } else {
                     // Editing chains off the task that produced the set; generating uploads the source image.
+                    // The node stores its image as a blob: URL, so it is read into a data URL before becoming a
+                    // file: handing the blob: URL over directly uploads an empty file and Tripo rejects it.
+                    const uploadSourceImage = async () => {
+                        const reference = sourceNodeReferenceImages(sourceNode)[0];
+                        const file = dataUrlToFile({ ...reference, dataUrl: await imageToDataUrl(reference) });
+                        return uploadModel3dImage(generationConfig, file, { signal: controller.signal });
+                    };
                     const result = prompts?.length
                         ? await requestEditMultiview(generationConfig, String(sourceNode.metadata.multiviewTaskId), prompts, { signal: controller.signal })
-                        : await requestImageToMultiview(generationConfig, await uploadModel3dImage(generationConfig, dataUrlToFile(sourceNodeReferenceImages(sourceNode)[0]), { signal: controller.signal }), { signal: controller.signal });
+                        : await requestImageToMultiview(generationConfig, await uploadSourceImage(), { signal: controller.signal });
                     history.task(result.taskId);
                     viewNodes = await Promise.all(result.views.map(async (item, index) => placeView(await uploadImage(item.url), item.view, index, result.taskId)));
                 }
@@ -1372,9 +1381,22 @@ function InfiniteCanvasPage() {
             setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
             setExpandedBatchNodeIds((current) => new Set([...current].filter((nodeId) => !allIds.has(nodeId))));
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
+            // A deleted 3D node must give up its live slot, or it would hold one against the limit forever.
+            for (const id of allIds) deactivateModel3dNode(id);
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId],
+        [chatSessions, cleanupCanvasFiles, deactivateModel3dNode, projectId],
+    );
+
+    // A 3D node with no preview image renders once to produce one; the still is stored like any other media so it
+    // survives a reload, and the node then shows it instead of holding a WebGL context open. Storing the key frees
+    // the live slot on the next render, because the node stops needing a thumbnail.
+    const handleModel3dThumbnail = useCallback(
+        async (nodeId: string, blob: Blob) => {
+            const stored = await uploadMediaFile(blob, "model3d-preview");
+            setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, model3dPreview: stored.url, model3dPreviewKey: stored.storageKey } } : node)));
+        },
+        [setNodes],
     );
 
     const groupSelection = useCallback(() => {
@@ -3898,6 +3920,7 @@ function InfiniteCanvasPage() {
                             onRetry={handleNodeRetry}
                             onViewImage={handleNodeViewImage}
                             onViewModel3d={handleNodeViewModel3d}
+                            onModel3dThumbnail={handleModel3dThumbnail}
                             onSelectReference={selectNodeReference}
                             onContextMenu={handleNodeContextMenu}
                         />

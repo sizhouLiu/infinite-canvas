@@ -1,6 +1,7 @@
 import { getNodeSpec, NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import type { AiConfig } from "@/stores/use-config-store";
+import { supportsModel3dQuad } from "@/services/api/model3d";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -75,13 +76,17 @@ export function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetada
 }
 
 export function buildModel3dGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
+    // The quad flag is recorded only when the model actually accepts it, mirroring the request: the setting stays
+    // switched on while a non-quad model is picked, and recording it verbatim would tell the viewer to hide
+    // triangulation edges on a mesh that was never quads to begin with.
+    const quad = supportsModel3dQuad(config.model || config.model3dModel) ? config.model3dQuad : "false";
     return {
         model: config.model,
         model3dTexture: config.model3dTexture,
         model3dPbr: config.model3dPbr,
         model3dTextureQuality: config.model3dTextureQuality,
         model3dFaceLimit: config.model3dFaceLimit,
-        model3dQuad: config.model3dQuad,
+        model3dQuad: quad,
     };
 }
 

@@ -253,7 +253,7 @@ export default {
         connecting: "连接中",
         openAgent: "打开本地 Codex 面板",
         nodeTypes: { image: "图片", text: "文本", config: "生成配置", video: "视频", audio: "音频", model3d: "3D 模型", group: "组" },
-        model3d: { loading: "正在加载 3D 模型", loadFailed: "3D 模型加载失败", empty: "暂无 3D 模型", generating: "正在生成 3D 模型", clip: "动画", boneCount: "骨骼：{{count}} 根", clipCount: "动画：{{count}} 个片段", rigged: "已绑骨", staticMesh: "静态模型", resetCamera: "复位相机", play: "播放动画", pause: "暂停动画", modes: { shaded: "实体", clay: "白模", claywire: "白模 + 线框", wireframe: "线框", skeleton: "骨骼" } },
+        model3d: { loading: "正在加载 3D 模型", loadFailed: "3D 模型加载失败", empty: "暂无 3D 模型", generating: "正在生成 3D 模型", clip: "动画", boneCount: "骨骼：{{count}} 根", clipCount: "动画：{{count}} 个片段", rigged: "已绑骨", staticMesh: "静态模型", activate: "点击加载模型", resetCamera: "复位相机", play: "播放动画", pause: "暂停动画", modes: { shaded: "实体", basecolor: "固有色", clay: "白模", claywire: "白模 + 线框", wireframe: "线框", skeleton: "骨骼" } },
         toolbar: {
             select: "选择", pan: "移动", text: "文本", image: "图片", video: "视频", audio: "音频", config: "生成配置", group: "组", extensions: "扩展节点", upload: "上传资产", appearance: "画布外观", clear: "清空画布",
             themeMode: "主题模式", light: "浅色", dark: "深色", gridStyle: "网格样式", dots: "点", lines: "线", blank: "空白", imageInfo: "图片信息",

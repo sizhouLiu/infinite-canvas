@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Box, ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
 
 import { CanvasModel3dViewer } from "@/components/canvas/canvas-model3d-viewer";
+import { MODEL3D_LIVE_LIMIT, useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
@@ -55,6 +56,8 @@ type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData, imageId?: string) => void;
     onViewModel3d?: (node: CanvasNodeData) => void;
+    /** Saves a still of a 3D node that has no preview image, so it can show one instead of rendering live. */
+    onModel3dThumbnail?: (nodeId: string, blob: Blob) => void;
     onSelectReference?: (nodeId: string) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -73,6 +76,7 @@ type NodeContentRendererProps = {
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
+    onModel3dThumbnail?: (nodeId: string, blob: Blob) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: (itemId: string) => void;
     onDuplicateBatchImage?: (imageId: string) => void;
@@ -120,6 +124,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onRetry,
     onViewImage,
     onViewModel3d,
+    onModel3dThumbnail,
     onSelectReference,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -423,6 +428,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onContentChange={onContentChange}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
+                        onModel3dThumbnail={onModel3dThumbnail}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={(itemId) => onSetBatchPrimary?.(data.id, itemId)}
                         onDuplicateBatchImage={(imageId) => onDuplicateBatchImage?.(data, imageId)}
@@ -718,8 +724,39 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
     return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-video={node.id} data-canvas-no-zoom />;
 }
 
-function Model3dNodeContent({ node, theme }: NodeContentRendererProps) {
+function Model3dNodeContent({ node, theme, onModel3dThumbnail }: NodeContentRendererProps) {
     const { t } = useTranslation();
+    const live = useCanvasUiStore((state) => state.model3dLiveNodeIds.includes(node.id));
+    const liveCount = useCanvasUiStore((state) => state.model3dLiveNodeIds.length);
+    const activate = useCanvasUiStore((state) => state.activateModel3dNode);
+    const deactivate = useCanvasUiStore((state) => state.deactivateModel3dNode);
+    const preview = node.metadata?.model3dPreview;
+    const needsThumbnail = Boolean(node.metadata?.content) && !preview && Boolean(onModel3dThumbnail);
+    // Separates a slot taken to produce a still from one the user asked for by clicking; only the former is
+    // handed back once the still exists.
+    const autoClaimedRef = useRef(false);
+
+    // A node with no still has nothing to show until it has rendered once, so it claims a slot to make one.
+    // Claiming rather than rendering straight away is what keeps a pile of freshly split parts from opening a
+    // context each at the same moment. Losing the claim is normal: the slot count changing re-runs this, so
+    // whoever is still waiting tries again as slots free up.
+    useEffect(() => {
+        if (needsThumbnail && !live && liveCount < MODEL3D_LIVE_LIMIT) {
+            autoClaimedRef.current = true;
+            activate(node.id);
+        }
+    }, [needsThumbnail, live, liveCount, activate, node.id]);
+
+    // Hand the slot back once the still is saved, or the first few nodes would hold every slot and the rest
+    // would wait for a still that never comes. A slot the user claimed is kept: demoting the model back to a
+    // still while they are dragging it would be the wrong answer.
+    useEffect(() => {
+        if (preview && autoClaimedRef.current) {
+            autoClaimedRef.current = false;
+            deactivate(node.id);
+        }
+    }, [preview, deactivate, node.id]);
+
     if (!node.metadata?.content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
@@ -727,7 +764,52 @@ function Model3dNodeContent({ node, theme }: NodeContentRendererProps) {
                 <span className="text-sm">{t(node.metadata?.status === "loading" ? "canvas.model3d.generating" : "canvas.model3d.empty")}</span>
             </div>
         );
-    return <CanvasModel3dViewer src={node.metadata.content} poster={node.metadata.model3dPreview} theme={theme} interactive={Boolean(node.metadata.interactive)} mimeType={node.metadata.mimeType} quad={node.metadata.model3dQuad === "true"} />;
+
+    // A 3D node costs a WebGL context and a render loop while it is live, and a canvas can hold far more of them
+    // than the browser allows contexts for, so a node that has a still to show stays a still until asked. Without
+    // a still there is nothing to show yet, so it renders once and saves one through onThumbnail.
+    if (!live && needsThumbnail)
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
+                <Box className="size-7 opacity-35" />
+                <span className="text-sm">{t("canvas.model3d.loading")}</span>
+            </div>
+        );
+
+    if (!live && preview)
+        return (
+            <button
+                type="button"
+                className="relative h-full w-full cursor-pointer overflow-hidden rounded-xl"
+                style={{ background: theme.node.fill }}
+                data-canvas-no-zoom
+                title={t("canvas.model3d.activate")}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    autoClaimedRef.current = false;
+                    activate(node.id);
+                }}
+            >
+                <img src={preview} alt="" className="size-full object-contain" draggable={false} />
+                <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px]" style={{ background: theme.toolbar.panel, color: theme.node.muted }}>
+                    <Box className="size-3" />
+                    {t("canvas.model3d.activate")}
+                </span>
+            </button>
+        );
+
+    return (
+        <CanvasModel3dViewer
+            src={node.metadata.content}
+            poster={preview}
+            theme={theme}
+            interactive={Boolean(node.metadata.interactive)}
+            mimeType={node.metadata.mimeType}
+            quad={node.metadata.model3dQuad === "true"}
+            onThumbnail={preview || !onModel3dThumbnail ? undefined : (blob) => onModel3dThumbnail(node.id, blob)}
+        />
+    );
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

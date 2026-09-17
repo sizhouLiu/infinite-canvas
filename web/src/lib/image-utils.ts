@@ -53,6 +53,10 @@ export function readImageMeta(dataUrl: string) {
 
 export function dataUrlToFile(image: ReferenceImage) {
     const [header, content] = image.dataUrl.split(",", 2);
+    // Only a data: URL carries its bytes. A blob: or https: URL splits into no content at all, and atob("") would
+    // hand back a zero-byte file that fails much later at the provider ("The image file is empty"), so callers must
+    // read the image into a data URL first and a mistake is reported here instead.
+    if (!image.dataUrl.startsWith("data:") || !content) throw new Error(i18n.t("common.imageReadFailed"));
     const mimeType = header.match(/data:(.*?);base64/)?.[1] || image.type || "image/png";
     const binary = atob(content || "");
     const bytes = new Uint8Array(binary.length);

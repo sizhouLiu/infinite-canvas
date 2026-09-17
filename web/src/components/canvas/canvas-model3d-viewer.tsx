@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bone, Grid3x3, Package, Pause, Play, RotateCcw } from "lucide-react";
+import { Bone, Grid3x3, Package, Palette, Pause, Play, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CanvasTheme } from "@/lib/canvas-theme";
@@ -39,11 +39,17 @@ function isFbxSource(src: string, mimeType?: string) {
     return /\.fbx(?:[?#]|$)/i.test(src);
 }
 
-/** Inspection modes: the shaded original, the untextured form, its topology, and the rig. */
-export const MODEL3D_MODES = ["shaded", "clay", "claywire", "wireframe", "skeleton"] as const;
+/** Inspection modes: the shaded original, its raw albedo, the untextured form, its topology, and the rig. */
+export const MODEL3D_MODES = ["shaded", "basecolor", "clay", "claywire", "wireframe", "skeleton"] as const;
 export type Model3dViewerMode = (typeof MODEL3D_MODES)[number];
 
-const MODE_ICONS: Record<Model3dViewerMode, typeof Bone> = { shaded: Package, clay: Package, claywire: Grid3x3, wireframe: Grid3x3, skeleton: Bone };
+const MODE_ICONS: Record<Model3dViewerMode, typeof Bone> = { shaded: Package, basecolor: Palette, clay: Package, claywire: Grid3x3, wireframe: Grid3x3, skeleton: Bone };
+
+/**
+ * Thumbnail edge in pixels. A 3D node is 360 CSS px and renders at up to 2x device pixel ratio, so this matches
+ * what the live viewer draws and the saved image does not visibly soften when it stands in for the model.
+ */
+const THUMBNAIL_SIZE = 720;
 
 /** Wire overlay colors: bright cyan reads on the dark wireframe ground, dark slate on the light clay. */
 const WIRE_STYLE: Record<"wireframe" | "claywire", { color: number; opacity: number }> = {
@@ -85,7 +91,21 @@ function createQuadEdgeGeometry(THREE: any, geometry: any) {
     const index = geometry.getIndex();
     const triangleCount = Math.floor((index ? index.count : position.count) / 3);
     if (!triangleCount) return null;
-    const vertexOf = (slot: number) => (index ? index.getX(slot) : slot);
+    const rawVertexOf = (slot: number) => (index ? index.getX(slot) : slot);
+
+    // Vertices are welded by position first. Exporters split vertices at UV and normal seams, so the two triangles
+    // of one quad often reference different indices at the very same point; comparing raw indices then finds no
+    // shared edge at all and every diagonal survives, leaving the plain triangle wireframe. Welding is what makes
+    // the shared-edge test see the topology rather than the vertex layout.
+    const canonical = new Int32Array(position.count);
+    const seen = new Map<string, number>();
+    for (let vertex = 0; vertex < position.count; vertex++) {
+        const key = `${position.getX(vertex).toFixed(5)},${position.getY(vertex).toFixed(5)},${position.getZ(vertex).toFixed(5)}`;
+        const existing = seen.get(key);
+        if (existing === undefined) seen.set(key, vertex);
+        canonical[vertex] = existing ?? vertex;
+    }
+    const vertexOf = (slot: number) => canonical[rawVertexOf(slot)];
     const edgeKey = (a: number, b: number) => (a < b ? a * position.count + b : b * position.count + a);
     const lengthSquared = (a: number, b: number) => {
         const dx = position.getX(a) - position.getX(b);
@@ -183,6 +203,21 @@ function removeWireOverlay(mesh: any) {
     mesh.remove(existing);
 }
 
+/** Scale the rendered frame into a fixed square so a thumbnail does not vary with the node's current size. */
+function captureThumbnail(source: HTMLCanvasElement, onBlob: (blob: Blob) => void) {
+    const canvas = document.createElement("canvas");
+    canvas.width = THUMBNAIL_SIZE;
+    canvas.height = THUMBNAIL_SIZE;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    // Fit rather than fill: the whole model stays in frame, matching what the live viewer shows.
+    const scale = Math.min(THUMBNAIL_SIZE / source.width, THUMBNAIL_SIZE / source.height);
+    const width = source.width * scale;
+    const height = source.height * scale;
+    context.drawImage(source, (THUMBNAIL_SIZE - width) / 2, (THUMBNAIL_SIZE - height) / 2, width, height);
+    canvas.toBlob((blob) => blob && onBlob(blob), "image/png");
+}
+
 type Model3dViewerProps = {
     src: string;
     poster?: string;
@@ -194,9 +229,14 @@ type Model3dViewerProps = {
     quad?: boolean;
     /** Mode and animation controls; off on the canvas node, where there is no room for them. */
     showControls?: boolean;
+    /**
+     * Called once with a still of the first rendered frame, for a node that has no preview image to show while
+     * it is not rendering live. Passing it turns on the readable drawing buffer, so it is left off elsewhere.
+     */
+    onThumbnail?: (blob: Blob) => void;
 };
 
-export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType, quad = false, showControls = false }: Model3dViewerProps) {
+export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType, quad = false, showControls = false, onThumbnail }: Model3dViewerProps) {
     const { t } = useTranslation();
     const mountRef = useRef<HTMLDivElement>(null);
     const controlsRef = useRef<any>(null);
@@ -204,6 +244,8 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
     const mixerRef = useRef<any>(null);
     const actionsRef = useRef<any[]>([]);
     const resetCameraRef = useRef<(() => void) | null>(null);
+    // Requests one more frame from the on-demand loop after something outside it changes the scene.
+    const invalidateRef = useRef<(() => void) | null>(null);
     const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
     const [mode, setMode] = useState<Model3dViewerMode>("shaded");
     const [boneCount, setBoneCount] = useState(0);
@@ -231,7 +273,9 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                 if (disposed) return;
                 scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                // preserveDrawingBuffer keeps the rendered frame readable after the draw call, which is what
+                // lets a thumbnail be captured; without it toBlob on the canvas comes back blank.
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: Boolean(onThumbnail) });
                 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                 renderer.outputColorSpace = THREE.SRGBColorSpace;
                 const canvas: HTMLCanvasElement = renderer.domElement;
@@ -260,6 +304,8 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                     renderer.setSize(clientWidth, clientHeight, false);
                     camera.aspect = clientWidth / clientHeight;
                     camera.updateProjectionMatrix();
+                    // Resizing clears the framebuffer, so the new size needs a frame of its own.
+                    invalidateRef.current?.();
                 };
                 resizeObserver = new ResizeObserver(resize);
                 resizeObserver.observe(mount);
@@ -286,6 +332,7 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                         camera.position.copy(home);
                         controls.target.set(0, 0, 0);
                         controls.update();
+                        invalidateRef.current?.();
                     };
 
                     // Keep the shipped materials so the shaded mode can be restored after a mode switch.
@@ -320,6 +367,23 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                     }
 
                     const clayMatcap = createClayMatcap(THREE);
+                    // Base color: the albedo texture drawn flat, with no lighting and none of the PBR maps, so the
+                    // texture itself can be judged instead of how a light happens to fall on it. The loader already
+                    // set the map's colour space, and reusing the very same texture keeps it. Meshes carry an array
+                    // of materials when the source split them into groups, which FBX products do.
+                    const baseColorMaterial = (source: any): any => {
+                        if (Array.isArray(source)) return source.map(baseColorMaterial);
+                        return new THREE.MeshBasicMaterial({
+                            map: source?.map || null,
+                            // glTF multiplies the base colour factor into the texture, so it is kept as well.
+                            color: source?.color ? source.color.clone() : new THREE.Color(0xffffff),
+                            vertexColors: Boolean(source?.vertexColors),
+                            transparent: Boolean(source?.transparent),
+                            opacity: source?.opacity ?? 1,
+                            alphaTest: source?.alphaTest || 0,
+                            side: source?.side ?? THREE.FrontSide,
+                        });
+                    };
                     const applyMode = (targetMode: Model3dViewerMode) => {
                         if (skeletonHelper) {
                             skeletonHelper.visible = targetMode === "skeleton";
@@ -346,6 +410,8 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                                     // only offset fills, so the faces are pushed back instead.
                                     ...(targetMode === "claywire" ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 } : {}),
                                 });
+                            } else if (targetMode === "basecolor") {
+                                child.material = baseColorMaterial(originalMaterials.get(child.uuid) || child.material);
                             } else if (targetMode === "skeleton" && bones > 0) {
                                 child.material = new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.18, depthWrite: false });
                             } else {
@@ -358,12 +424,35 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
 
                     setStatus("ready");
                     const clock = new THREE.Clock();
+                    // A still model is redrawn only when something actually changes. Twenty-odd nodes each
+                    // redrawing an unchanging frame 60 times a second was the bulk of the canvas slowdown, and
+                    // OrbitControls with damping keeps reporting change until it settles, so the loop stays live
+                    // while the user is dragging and stops on its own once it comes to rest.
+                    let dirty = true;
+                    controls.addEventListener("change", () => {
+                        dirty = true;
+                    });
+                    invalidateRef.current = () => {
+                        dirty = true;
+                    };
+                    let captured = !onThumbnail;
                     const render = () => {
                         if (disposed) return;
                         const delta = clock.getDelta();
-                        mixerRef.current?.update(delta);
-                        controls.update();
-                        renderer.render(scene, camera);
+                        // An animating rig changes every frame; damping settles over several.
+                        const animating = Boolean(mixerRef.current && actionsRef.current.some((action: any) => action.isRunning?.()));
+                        if (animating) mixerRef.current.update(delta);
+                        const moved = controls.update();
+                        if (dirty || animating || moved) {
+                            renderer.render(scene, camera);
+                            dirty = false;
+                            if (!captured) {
+                                captured = true;
+                                // Read back the frame just drawn, so a node with no preview image of its own gets
+                                // one and can show it instead of holding a context open.
+                                captureThumbnail(canvas, (blob) => !disposed && onThumbnail?.(blob));
+                            }
+                        }
                         frame = requestAnimationFrame(render);
                     };
                     render();
@@ -382,6 +471,7 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
             controlsRef.current = null;
             applyModeRef.current = null;
             resetCameraRef.current = null;
+            invalidateRef.current = null;
             mixerRef.current?.stopAllAction?.();
             mixerRef.current = null;
             actionsRef.current = [];
@@ -409,12 +499,16 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
         if (controlsRef.current) controlsRef.current.enabled = interactive;
     }, [interactive]);
 
+    // These three change the scene from outside the render loop, which now only draws on demand, so each
+    // asks for a frame; otherwise the change would not appear until something else happened to trigger one.
     useEffect(() => {
         applyModeRef.current?.(mode);
+        invalidateRef.current?.();
     }, [mode, status]);
 
     useEffect(() => {
         for (const action of actionsRef.current) action.paused = !playing;
+        invalidateRef.current?.();
     }, [playing]);
 
     useEffect(() => {
@@ -426,6 +520,7 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                 action.paused = !playing;
             } else action.stop();
         });
+        invalidateRef.current?.();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeClip]);
 
