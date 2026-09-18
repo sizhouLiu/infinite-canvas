@@ -7,3 +7,9 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    # 同源转发代理默认开启（/proxy）。自定义渠道的域名用 PROXY_ALLOW_HOSTS 追加。
+    # 不需要代理时设 PROXY_URL: ""。
+    # environment:
+    #   PROXY_ALLOW_HOSTS: api.example.com
+    #   PROXY_URL: /proxy
+

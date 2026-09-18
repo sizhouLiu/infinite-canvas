@@ -7,6 +7,8 @@ description: Deploy Infinite Canvas with Docker Compose
 
 ## Use the published image
 
+The published image `ghcr.io/basketikun/infinite-canvas` comes from upstream and **does not** include the same-origin proxy in this source tree. To host the current source for other people, use "Build locally" below.
+
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
 cd infinite-canvas
@@ -37,7 +39,31 @@ cd docs
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-The main application container only runs Next.js. Canvases, My Assets, generation history, and API keys are stored in the browser by default, while prompt repositories are fetched directly by the frontend. No persistent data volume is required for this data.
+## Data
+
+The main application container serves the static frontend through nginx and starts a same-origin forwarding proxy at `/proxy`. Canvases, My Assets, generation history, and API keys stay in the browser; the proxy only forwards requests and does not store keys. Prompt repositories are fetched directly by the frontend. No persistent data volume is required for this data.
+
+## Same-origin proxy
+
+Tripo and some other providers send no CORS headers, so a browser on another machine cannot call them directly. The image therefore runs `canvas-proxy` next to nginx and the frontend is pre-filled with `/proxy`. Visitors do not need to run `npx @basketikun/canvas-proxy` on their own computers.
+
+| Variable | Description |
+| --- | --- |
+| `PROXY_URL` | Proxy address injected into the page. Defaults to `/proxy`. Set it to an empty string to turn the hosted proxy off and let each visitor configure a local one. |
+| `PROXY_ALLOW_HOSTS` | Extra host suffixes, comma-separated. The image already allows `openai.com`, `googleapis.com`, `tripo3d.com`, and `tripo3d.ai`. Add a custom channel host here or those requests are refused. |
+
+Private, loopback, and link-local addresses are always refused, even when listed. nginx also rate-limits `/proxy/` per client IP (8 requests per second, burst 20). API keys still live in each visitor's browser and are forwarded in request headers; the container does not keep them.
+
+```yaml
+services:
+  app:
+    image: ghcr.io/basketikun/infinite-canvas:latest
+    ports:
+      - "3000:3000"
+    environment:
+      PROXY_ALLOW_HOSTS: api.example.com
+      # PROXY_URL: ""   # disable the hosted proxy
+```
 
 ## Optional analytics
 

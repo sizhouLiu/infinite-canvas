@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { TRIPO_MODELS } from "./model3d";
-import { requestTripoImageEdit, requestTripoImageGeneration, TRIPO_IMAGE_MODELS } from "./tripo-image";
+import { requestTripoImageEdit, requestTripoImageGeneration, supportsTripoBackground, TRIPO_IMAGE_MODELS } from "./tripo-image";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -818,6 +818,19 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     } catch (error) {
         throw imageError(error, apiText("requestFailed"));
     }
+}
+
+/**
+ * Whether an image request on this model can come back with a transparent background. Read from the model and
+ * channel alone — asking the provider would cost a billed generation. Gemini has no background parameter at
+ * all, and Tripo accepts one on only two of its models.
+ */
+export function supportsTransparentBackground(config: AiConfig, model?: string) {
+    const value = model || config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, value);
+    if (resolveModelScript(config, value)) return true;
+    if (requestConfig.apiFormat === "tripo") return supportsTripoBackground(requestConfig.model);
+    return requestConfig.apiFormat !== "gemini";
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {

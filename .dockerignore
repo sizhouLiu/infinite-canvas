@@ -12,3 +12,4 @@ web/out
 *.log
 .env*
 !.env.example
+canvas-proxy/index.test.js

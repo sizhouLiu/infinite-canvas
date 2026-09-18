@@ -11,12 +11,22 @@ sanitize_id() {
     printf '%s' "$1" | tr -cd 'A-Za-z0-9-'
 }
 
+# Proxy URLs may be a same-origin path (/proxy) or an absolute http(s) URL.
+# Keep only characters that belong in a URL so quotes or control characters
+# cannot break the JavaScript string written into config.js.
+sanitize_url() {
+    printf '%s' "$1" | tr -cd 'A-Za-z0-9:/._?&=+%-'
+}
+
 GA4_ID=$(sanitize_id "${ANALYTICS_GA4_ID:-}")
 BAIDU_ID=$(sanitize_id "${ANALYTICS_BAIDU_ID:-}")
+# The in-image proxy is on by default; set PROXY_URL empty to leave it for the user to configure.
+PROXY_URL=$(sanitize_url "${PROXY_URL-/proxy}")
 
 cat > /usr/share/nginx/html/config.js <<EOF
 window.__RUNTIME_CONFIG__ = {
   ANALYTICS_GA4_ID: "${GA4_ID}",
-  ANALYTICS_BAIDU_ID: "${BAIDU_ID}"
+  ANALYTICS_BAIDU_ID: "${BAIDU_ID}",
+  PROXY_URL: "${PROXY_URL}"
 };
 EOF

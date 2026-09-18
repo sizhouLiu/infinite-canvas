@@ -9,3 +9,10 @@ services:
     # environment:
     #   ANALYTICS_GA4_ID: G-XXXXXXXXXX                    # Google Analytics 4 衡量 ID
     #   ANALYTICS_BAIDU_ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxx   # 百度统计站点 ID
+
+    # 同源转发代理默认开启（/proxy）。自定义渠道的域名用 PROXY_ALLOW_HOSTS 追加（逗号分隔）。
+    # 不需要代理时设 PROXY_URL: ""。
+    # environment:
+    #   PROXY_ALLOW_HOSTS: api.example.com
+    #   PROXY_URL: /proxy
+

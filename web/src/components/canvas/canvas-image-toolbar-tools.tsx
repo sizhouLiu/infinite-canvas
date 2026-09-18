@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { Boxes, Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Blocks, Boxes, Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 import i18n from "@/i18n";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view" | "multiview" | "builtinMultiview";
+export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "decompose" | "upscale" | "superResolve" | "angle" | "view" | "multiview" | "builtinMultiview";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -13,6 +13,7 @@ export type ImageToolHandlers = {
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
     onSplit: (node: CanvasNodeData) => void;
+    onDecompose: (node: CanvasNodeData) => void;
     onUpscale: (node: CanvasNodeData) => void;
     onSuperResolve: (node: CanvasNodeData) => void;
     onAngle: (node: CanvasNodeData) => void;
@@ -38,8 +39,8 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-// Bumped to v8 so the multiview tool, now visible by default, also reaches users who had saved a tool set.
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v8";
+// Bumped to v9 so the decompose tool, visible by default, also reaches users who had saved a tool set.
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v9";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download"];
 
@@ -100,6 +101,15 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: () => i18n.t("canvas.imageTools.splitTitle"),
         icon: () => <Grid2x2 className="size-4" />,
         run: (node, handlers) => handlers.onSplit(node),
+    },
+    {
+        // Splits by what the model sees in the picture, unlike "split", which cuts a grid of pixels.
+        id: "decompose",
+        defaultVisible: true,
+        label: () => i18n.t("canvas.imageTools.decompose"),
+        title: () => i18n.t("canvas.imageTools.decomposeTitle"),
+        icon: () => <Blocks className="size-4" />,
+        run: (node, handlers) => handlers.onDecompose(node),
     },
     {
         // Drives the configured image model with four view prompts, so it needs no Tripo channel.

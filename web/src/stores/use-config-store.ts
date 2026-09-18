@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
+import { HOSTED_PROXY_URL } from "@/constant/runtime-config";
 import i18n from "@/i18n";
 
 export type ApiCallFormat = "openai" | "gemini" | "tripo";
@@ -157,8 +158,8 @@ export const defaultConfig: AiConfig = {
     background: "",
     count: "1",
     canvasImageCount: "3",
-    proxyEnabled: false,
-    proxyUrl: DEFAULT_LOCAL_PROXY_URL,
+    proxyEnabled: Boolean(HOSTED_PROXY_URL),
+    proxyUrl: HOSTED_PROXY_URL || DEFAULT_LOCAL_PROXY_URL,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -324,8 +325,8 @@ export const useConfigStore = create<ConfigStore>()(
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" ? "reference" : "frames",
                         canvasImageCount: config.canvasImageCount || "3",
-                        proxyEnabled: Boolean(config.proxyEnabled),
-                        proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
+                        proxyEnabled: HOSTED_PROXY_URL ? true : Boolean(config.proxyEnabled),
+                        proxyUrl: HOSTED_PROXY_URL || config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
                     },
                 };
             },
@@ -537,14 +538,17 @@ export function buildApiUrl(baseUrl: string, path: string) {
 export function normalizeLocalProxyUrl(value: string) {
     const trimmed = value.trim().replace(/\/+$/, "");
     if (!trimmed) return "";
+    if (trimmed.startsWith("/")) return trimmed;
     return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
 }
 
-/** Prefix an outgoing request with the local forwarding proxy so the browser is not blocked by CORS. */
+/** Prefix an outgoing request with the forwarding proxy so the browser is not blocked by CORS. */
 export function withLocalProxy(url: string) {
     const { proxyEnabled, proxyUrl } = useConfigStore.getState().config;
     if (!proxyEnabled || !/^https?:\/\//i.test(url)) return url;
     const base = normalizeLocalProxyUrl(proxyUrl);
-    if (!base || url.startsWith(`${base}/`)) return url;
-    return `${base}/${url}`;
+    if (!base) return url;
+    const absolute = base.startsWith("/") && typeof window !== "undefined" ? `${window.location.origin}${base}` : base;
+    if (url.startsWith(`${absolute}/`)) return url;
+    return `${absolute}/${url}`;
 }

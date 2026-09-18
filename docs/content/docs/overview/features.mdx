@@ -63,5 +63,5 @@ See [Third-party Prompt Sources](/docs/overview/third-party-prompt-repositories)
 ## Current limitations
 
 - The project is frontend-first and does not provide built-in cloud accounts or cloud storage.
-- API keys remain in browser storage and requests are sent directly to configured providers.
+- API keys remain in browser storage. Requests go directly to configured providers by default; a Docker deployment forwards them through the site's same-origin `/proxy` so the browser is not blocked by CORS, without storing the keys on the server.
 - Production Docker static-resource paths still require broader deployment verification.

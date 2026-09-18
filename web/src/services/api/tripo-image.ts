@@ -37,6 +37,10 @@ export function supportsTripoQuality(model: string) {
     return QUALITY_MODELS.includes(model);
 }
 
+export function supportsTripoBackground(model: string) {
+    return BACKGROUND_MODELS.includes(model);
+}
+
 /** Tripo rejects `auto` outright — it prices the request up front — so an unknown tier is dropped. */
 function resolveTripoQuality(model: string, quality: string | undefined) {
     const tiers = QUALITY_TIERS_BY_MODEL[model];

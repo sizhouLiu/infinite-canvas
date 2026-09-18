@@ -9,6 +9,7 @@ import { ChannelEditorDrawer } from "@/components/layout/channel-editor-drawer";
 import { ConfigLocalProxy } from "@/components/layout/config-local-proxy";
 import { ConfigPromptSources } from "@/components/layout/config-prompt-sources";
 import { ConfigLocalStorage } from "@/components/layout/config-local-storage";
+import { HOSTED_PROXY_URL } from "@/constant/runtime-config";
 import type { AppLocale } from "@/i18n";
 import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
@@ -215,7 +216,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     },
                     {
                         key: "local-proxy",
-                        label: t("config.tabs.localProxy"),
+                        label: t(HOSTED_PROXY_URL ? "config.proxy.hostedTitle" : "config.tabs.localProxy"),
                         children: <ConfigLocalProxy />,
                     },
                     {

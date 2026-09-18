@@ -3,6 +3,7 @@ import { Copy, Network, Wifi } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { HOSTED_PROXY_URL } from "@/constant/runtime-config";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { testLocalProxy } from "@/services/api/local-proxy";
 import { DEFAULT_LOCAL_PROXY_URL, LOCAL_PROXY_PACKAGE, normalizeLocalProxyUrl, useConfigStore } from "@/stores/use-config-store";
@@ -14,6 +15,7 @@ export function ConfigLocalProxy() {
     const [testing, setTesting] = useState(false);
     const config = useConfigStore((state) => state.config);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const hosted = Boolean(HOSTED_PROXY_URL);
     const command = localProxyCommand(config.proxyUrl);
 
     const testProxy = async () => {
@@ -34,24 +36,27 @@ export function ConfigLocalProxy() {
                     <div>
                         <div className="flex items-center gap-2 text-sm font-semibold">
                             <Network className="size-4" />
-                            {t("config.proxy.title")}
+                            {t(hosted ? "config.proxy.hostedTitle" : "config.proxy.title")}
                         </div>
-                        <div className="mt-1 text-xs text-stone-500">{t("config.proxy.description")}</div>
+                        <div className="mt-1 text-xs text-stone-500">{t(hosted ? "config.proxy.hostedDescription" : "config.proxy.description")}</div>
                     </div>
-                    <Switch checked={config.proxyEnabled} onChange={(checked) => updateConfig("proxyEnabled", checked)} />
+                    <Switch checked={config.proxyEnabled} disabled={hosted} onChange={(checked) => updateConfig("proxyEnabled", checked)} />
                 </div>
                 {config.proxyEnabled ? (
                     <>
-                        <div className="mt-3 rounded-md bg-stone-100 px-3 py-2 dark:bg-stone-900">
-                            <div className="mb-1 text-xs text-stone-500">{t("config.proxy.startHint")}</div>
-                            <div className="flex items-center justify-between gap-3">
-                                <code className="min-w-0 truncate text-xs">{command}</code>
-                                <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => copyText(command)} />
+                        {hosted ? null : (
+                            <div className="mt-3 rounded-md bg-stone-100 px-3 py-2 dark:bg-stone-900">
+                                <div className="mb-1 text-xs text-stone-500">{t("config.proxy.startHint")}</div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <code className="min-w-0 truncate text-xs">{command}</code>
+                                    <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => copyText(command)} />
+                                </div>
                             </div>
-                        </div>
-                        <Form.Item label={t("config.proxy.address")} extra={t("config.proxy.addressDescription")} className="mt-3 mb-0">
+                        )}
+                        <Form.Item label={t("config.proxy.address")} extra={t(hosted ? "config.proxy.hostedAddressDescription" : "config.proxy.addressDescription")} className="mt-3 mb-0">
                             <Input
                                 value={config.proxyUrl}
+                                disabled={hosted}
                                 placeholder={DEFAULT_LOCAL_PROXY_URL}
                                 onChange={(event) => updateConfig("proxyUrl", event.target.value)}
                                 onBlur={(event) => updateConfig("proxyUrl", normalizeLocalProxyUrl(event.target.value) || DEFAULT_LOCAL_PROXY_URL)}
@@ -60,7 +65,7 @@ export function ConfigLocalProxy() {
                         <Button className="mt-3" icon={<Wifi className="size-4" />} loading={testing} onClick={() => void testProxy()}>
                             {t("config.proxy.test")}
                         </Button>
-                        <div className="mt-3 text-xs text-stone-500">{t("config.proxy.channelHint")}</div>
+                        <div className="mt-3 text-xs text-stone-500">{t(hosted ? "config.proxy.hostedChannelHint" : "config.proxy.channelHint")}</div>
                     </>
                 ) : null}
             </section>

@@ -9,6 +9,8 @@ description: 使用 Docker Compose 部署无限画布
 
 ## 使用发布镜像
 
+发布镜像 `ghcr.io/basketikun/infinite-canvas` 来自上游仓库，**不含**这份源码里的同源转发代理。要把当前源码部署给别人用，请走下面的「本地构建镜像」。
+
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
 cd infinite-canvas
@@ -49,7 +51,29 @@ docker compose -f docker-compose.local.yml up -d --build
 
 ## 数据说明
 
-当前主应用镜像只启动 Next.js。画布、我的素材、生成记录和 AI API Key 默认保存在浏览器本地；第三方提示词由浏览器前端直连拉取，不需要额外挂载数据目录。
+当前主应用镜像用 nginx 托管静态前端，并在容器内启动同源转发代理（`/proxy`）。画布、我的素材、生成记录和 AI API Key 仍保存在使用者的浏览器本地；代理只转发请求，不存储 Key。第三方提示词由浏览器前端直连拉取，不需要额外挂载数据目录。
+
+## 同源转发代理
+
+Tripo 等渠道不返回 CORS 头，别人打开你部署的站点时浏览器无法直连。镜像因此在 nginx 旁边跑一份 `canvas-proxy`，前端预填同源 `/proxy`，访问者不用再在自己电脑上跑 `npx @basketikun/canvas-proxy`。
+
+| 变量 | 说明 |
+| --- | --- |
+| `PROXY_URL` | 注入到页面的代理地址，默认 `/proxy`。设为空字符串则关闭内置代理，改由访问者自己配本机代理。 |
+| `PROXY_ALLOW_HOSTS` | 额外放行的域名后缀，逗号分隔。镜像已内置 `openai.com`、`googleapis.com`、`tripo3d.com`、`tripo3d.ai`。自定义渠道的域名不在名单里会被拒绝转发。 |
+
+回环、链路本地和私有网段一律拒绝，即使写进白名单也不放行。nginx 还按客户端 IP 对 `/proxy/` 限流（8 次/秒，突发 20）。API Key 仍留在每位访问者的浏览器里，请求时随头转发，容器不保存。
+
+```yaml
+services:
+  app:
+    image: ghcr.io/basketikun/infinite-canvas:latest
+    ports:
+      - "3000:3000"
+    environment:
+      PROXY_ALLOW_HOSTS: api.example.com
+      # PROXY_URL: ""   # 关闭内置代理
+```
 
 ## 统计分析（可选）
 

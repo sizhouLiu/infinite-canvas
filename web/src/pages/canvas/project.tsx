@@ -6,7 +6,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestImageQuestion, supportsTransparentBackground } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createModel3dTask, isModel3dTaskFailed, model3dRequestOptions, storeGeneratedModel3d, storeModel3dPreview, uploadModel3dImage, waitForModel3dTask, type Model3dResult } from "@/services/api/model3d";
 import {
@@ -53,6 +53,7 @@ import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-pa
 import { CanvasNodeParameterRows } from "@/components/canvas/canvas-node-parameter-rows";
 import { CanvasNodeContextMenu } from "@/components/canvas/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
+import { CanvasNodeDecomposeDialog } from "@/components/canvas/canvas-node-decompose-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
@@ -76,6 +77,7 @@ import { useGenerationHistoryStore, type GenerationHistoryInput } from "@/stores
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, getGroupResourceNodes, getParameterSourceNode, isCanvasReferenceNode, isConfigParameterSource, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { DECOMPOSE_MAX_ITEMS, decomposeExtractPrompt, decomposeListPrompt, parseDecomposeList, type DecomposeItem } from "@/lib/canvas/canvas-decompose-prompts";
 import { BUILTIN_MULTIVIEW_VIEWS, multiviewDelay, multiviewPrompt, retryAfterSeconds } from "@/lib/canvas/canvas-multiview-prompts";
 import { splitModel3dParts } from "@/lib/canvas/canvas-model3d-parts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
@@ -294,6 +296,7 @@ function InfiniteCanvasPage() {
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
+    const [decomposeNodeId, setDecomposeNodeId] = useState<string | null>(null);
     const [model3dOpTarget, setModel3dOpTarget] = useState<{ nodeId: string; op: Model3dOpId } | null>(null);
     const [multiviewEditNodeId, setMultiviewEditNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
@@ -1183,6 +1186,7 @@ function InfiniteCanvasPage() {
     const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
+    const decomposeNode = decomposeNodeId ? nodeById.get(decomposeNodeId) || null : null;
     const model3dOpNode = model3dOpTarget ? nodeById.get(model3dOpTarget.nodeId) || null : null;
     const multiviewEditNode = multiviewEditNodeId ? nodeById.get(multiviewEditNodeId) || null : null;
     const contextMenuNode = contextMenu?.type === "node" ? nodeById.get(contextMenu.nodeId) || null : null;
@@ -1376,6 +1380,7 @@ function InfiniteCanvasPage() {
             setCropNodeId((current) => (current && allIds.has(current) ? null : current));
             setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
+            setDecomposeNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
@@ -1489,6 +1494,7 @@ function InfiniteCanvasPage() {
         setCropNodeId(null);
         setMaskEditNodeId(null);
         setAngleNodeId(null);
+        setDecomposeNodeId(null);
         setPreviewNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
@@ -2151,6 +2157,7 @@ function InfiniteCanvasPage() {
                 setInfoNodeId(null);
                 setCropNodeId(null);
                 setMaskEditNodeId(null);
+                setDecomposeNodeId(null);
                 setPendingConnectionCreate(null);
             }
         };
@@ -2672,6 +2679,124 @@ function InfiniteCanvasPage() {
             }
         },
         [finishGenerationRequest, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
+    );
+
+    /**
+     * Scene decomposition, listing step: ask the text model which separable objects the picture holds. One
+     * cheap text call, no node written and nothing recorded — the answer is a proposal the user edits in the
+     * dialog before any image credits are spent.
+     */
+    const analyzeImageComponents = useCallback(
+        async (node: CanvasNodeData): Promise<DecomposeItem[]> => {
+            const generationConfig = nodeGenerationConfig(node, "text");
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                throw new Error(t("canvas.decompose.configMissing"));
+            }
+            const context = await hydrateNodeGenerationContext(buildNodeGenerationContext(node.id, nodesRef.current, connectionsRef.current, ""));
+            const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...context, prompt: decomposeListPrompt(DECOMPOSE_MAX_ITEMS) }), () => {});
+            return parseDecomposeList(answer, DECOMPOSE_MAX_ITEMS);
+        },
+        [isAiConfigReady, nodeGenerationConfig, openConfigDialog, t],
+    );
+
+    /**
+     * Scene decomposition, extraction step: one image edit per component, each against the original scene so
+     * no object inherits another's mistakes. Run one at a time for the same reason the built-in multiview does
+     * — image providers commonly allow a single concurrent generation — and a rate-limited item is retried once
+     * after the delay the provider asks for. A single component failing must not lose the rest.
+     */
+    const generateImageComponents = useCallback(
+        async (sourceNode: CanvasNodeData, items: DecomposeItem[]) => {
+            if (!sourceNode.metadata?.content || !items.length) return;
+            const generationConfig = { ...nodeGenerationConfig(sourceNode, "image"), count: "1", background: "transparent" };
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                return;
+            }
+
+            const controller = startGenerationRequest(sourceNode.id, sourceNode.id, sourceNode.id);
+            const history = trackGeneration({ nodeId: sourceNode.id, kind: "image", title: t("canvas.projectPage.decomposeGroupTitle"), model: generationConfig.model, op: "decompose" });
+            setRunningNodeId(sourceNode.id);
+            setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+            try {
+                // Hydrated once and reused: the node stores its image as a blob: URL, which would upload as an
+                // empty file, and re-reading it per component would repeat the work for no gain.
+                const references = await Promise.all(sourceNodeReferenceImages(sourceNode).map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) })));
+                const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, references);
+                const gap = 16;
+                const columns = 3;
+                const cellWidth = sourceNode.width / 2;
+                const cellHeight = sourceNode.height / 2;
+                const startX = sourceNode.position.x + sourceNode.width + 96;
+
+                const partNodes: CanvasNodeData[] = [];
+                let failed = 0;
+                let lastError: unknown;
+                for (const item of items) {
+                    const runItem = () => requestEdit(generationConfig, decomposeExtractPrompt(item), references, { signal: controller.signal }).then((results) => results[0]);
+                    try {
+                        let image;
+                        try {
+                            image = await runItem();
+                        } catch (error) {
+                            const wait = retryAfterSeconds(error);
+                            if (wait === null) throw error;
+                            message.info(t("canvas.projectPage.decomposeRateLimited", { seconds: wait }));
+                            await multiviewDelay(wait * 1000, controller.signal);
+                            image = await runItem();
+                        }
+                        if (!image) throw new Error(t("canvas.projectPage.generationFailed"));
+                        const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                        const position = partNodes.length;
+                        partNodes.push({
+                            id: nanoid(),
+                            type: CanvasNodeType.Image,
+                            title: item.name,
+                            position: { x: startX + (position % columns) * (cellWidth + gap), y: sourceNode.position.y + Math.floor(position / columns) * (cellHeight + gap) },
+                            width: cellWidth,
+                            height: cellHeight,
+                            metadata: { ...imageMetadata(uploaded), ...generationMetadata, prompt: decomposeExtractPrompt(item) },
+                        });
+                    } catch (error) {
+                        // A cancel stops the whole run; one component's failure must not lose the others.
+                        if (isGenerationCanceled(error)) throw error;
+                        failed++;
+                        lastError = error;
+                    }
+                }
+                if (!partNodes.length) throw lastError;
+                if (failed) message.warning(t("canvas.projectPage.decomposePartialFailure", { count: failed }));
+
+                // Group the components so the set moves as one unit, matching how the multiview set is wrapped.
+                // A lone survivor stays ungrouped, like manual grouping's two-member minimum.
+                const groupNode: CanvasNodeData | null =
+                    partNodes.length > 1
+                        ? (() => {
+                              const rect = getGroupWrapRect(partNodes);
+                              const created = createCanvasNode(CanvasNodeType.Group, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+                              return { ...created, title: t("canvas.projectPage.decomposeGroupTitle"), position: { x: rect.x, y: rect.y }, width: rect.width, height: rect.height };
+                          })()
+                        : null;
+                const members = groupNode ? partNodes.map((node) => ({ ...node, metadata: { ...node.metadata, groupId: groupNode.id } })) : partNodes;
+                // The group is inserted before its members so it paints underneath rather than covering them.
+                setNodes((prev) => [...prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), ...(groupNode ? [groupNode] : []), ...members]);
+                setConnections((prev) => [...prev, ...members.map((child) => ({ id: nanoid(), fromNodeId: sourceNode.id, toNodeId: child.id }))]);
+                setSelectedNodeIds(new Set(groupNode ? [groupNode.id] : members.map((child) => child.id)));
+                setSelectedConnectionId(null);
+                history.done({ nodeId: groupNode?.id || members[0].id, storageKey: members[0].metadata?.storageKey, mimeType: members[0].metadata?.mimeType });
+            } catch (error) {
+                history.fail(error);
+                if (isGenerationCanceled(error)) return;
+                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                message.error(errorDetails);
+                setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+            } finally {
+                finishGenerationRequest(sourceNode.id, controller);
+                setRunningNodeId((current) => (current === sourceNode.id ? null : current));
+            }
+        },
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -3978,6 +4103,7 @@ function InfiniteCanvasPage() {
                     onUpscale={(node) => setUpscaleNodeId(node.id)}
                     onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
                     onAngle={(node) => setAngleNodeId(node.id)}
+                    onDecompose={(node) => setDecomposeNodeId(node.id)}
                     onViewImage={handleNodeViewImage}
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={handleNodeRetry}
@@ -4078,6 +4204,19 @@ function InfiniteCanvasPage() {
                 </Modal>
 
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
+                {decomposeNode?.metadata?.content ? (
+                    <CanvasNodeDecomposeDialog
+                        dataUrl={decomposeNode.metadata.content}
+                        open={Boolean(decomposeNode)}
+                        transparentSupported={supportsTransparentBackground(nodeGenerationConfig(decomposeNode, "image"))}
+                        onClose={() => setDecomposeNodeId(null)}
+                        onAnalyze={() => analyzeImageComponents(decomposeNode)}
+                        onConfirm={(items) => {
+                            setDecomposeNodeId(null);
+                            void generateImageComponents(decomposeNode, items);
+                        }}
+                    />
+                ) : null}
                 <CanvasMultiviewEditDialog
                     open={Boolean(multiviewEditNode)}
                     onCancel={() => setMultiviewEditNodeId(null)}
