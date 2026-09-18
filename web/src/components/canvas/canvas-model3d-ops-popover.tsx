@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Bone, Boxes, Brush, Download, PersonStanding, Scissors, Shrink, Wand2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -9,7 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
-const OP_ICONS: Record<Model3dOpId, ReactNode> = {
+export const MODEL3D_OP_ICONS: Record<Model3dOpId, ReactNode> = {
     texture: <Brush className="size-4" />,
     rig: <Bone className="size-4" />,
     retarget: <PersonStanding className="size-4" />,
@@ -21,7 +21,7 @@ const OP_ICONS: Record<Model3dOpId, ReactNode> = {
 };
 
 /** Operations offered on an existing 3D node, in the order they are most often used. */
-const MENU_OPS: Model3dOpId[] = ["texture", "rig", "retarget", "decimate", "segment", "complete", "convert"];
+export const MODEL3D_MENU_OPS: Model3dOpId[] = ["texture", "rig", "retarget", "decimate", "segment", "complete", "convert"];
 
 /**
  * The toolbar's ToolbarTool only supports a flat onClick, so this is a self-managed portal popover
@@ -83,7 +83,7 @@ export function CanvasModel3dOpsPopover({ node, onSelect, onDownloadConverted }:
                           }}
                           onPointerDown={(event) => event.stopPropagation()}
                       >
-                          {MENU_OPS.map((op) => {
+                          {MODEL3D_MENU_OPS.map((op) => {
                               const blocked = model3dOpBlockedReason(op, node);
                               return (
                                   <button
@@ -98,7 +98,7 @@ export function CanvasModel3dOpsPopover({ node, onSelect, onDownloadConverted }:
                                           onSelect(op);
                                       }}
                                   >
-                                      {OP_ICONS[op]}
+                                      {MODEL3D_OP_ICONS[op]}
                                       <span>{model3dOpLabel(op)}</span>
                                   </button>
                               );

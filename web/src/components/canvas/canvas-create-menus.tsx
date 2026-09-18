@@ -5,7 +5,9 @@ import { useTranslation } from "react-i18next";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { listNodeDefinitions, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
-import { CanvasNodeType, type ConnectionHandle, type Position } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type Position } from "@/types/canvas";
+import { model3dOpBlockedReason, model3dOpLabel, type Model3dOpId } from "./canvas-model3d-ops";
+import { MODEL3D_MENU_OPS, MODEL3D_OP_ICONS } from "./canvas-model3d-ops-popover";
 
 export type PendingConnectionCreate = {
     connection: ConnectionHandle;
@@ -14,18 +16,23 @@ export type PendingConnectionCreate = {
 
 export function ConnectionCreateMenu({
     pending,
+    sourceNode,
     onCreate,
+    onModel3dOp,
     onClose,
 }: {
     pending: PendingConnectionCreate;
+    sourceNode?: CanvasNodeData;
     onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d) => void;
+    onModel3dOp?: (op: Model3dOpId) => void;
     onClose: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const showModel3dOps = pending.connection.handleType === "source" && sourceNode?.type === CanvasNodeType.Model3d && Boolean(sourceNode.metadata?.content) && Boolean(onModel3dOp);
     return (
         <div
-            className="absolute z-[120] w-[300px] rounded-[18px] border p-3 shadow-2xl backdrop-blur"
+            className="absolute z-[120] max-h-[70vh] w-[300px] overflow-y-auto rounded-[18px] border p-3 shadow-2xl backdrop-blur thin-scrollbar"
             data-connection-create-menu
             style={{ left: pending.position.x, top: pending.position.y, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
@@ -40,6 +47,15 @@ export function ConnectionCreateMenu({
                 </button>
             </div>
             <div className="grid gap-1">
+                {showModel3dOps && sourceNode ? (
+                    <>
+                        {MODEL3D_MENU_OPS.map((op) => {
+                            const blocked = model3dOpBlockedReason(op, sourceNode);
+                            return <ConnectionCreateOption key={op} theme={theme} icon={<span className="[&>svg]:size-5">{MODEL3D_OP_ICONS[op]}</span>} title={model3dOpLabel(op)} disabled={Boolean(blocked)} hint={blocked || undefined} onClick={() => onModel3dOp?.(op)} />;
+                        })}
+                        <div className="my-1 border-t" style={{ borderColor: theme.node.stroke }} />
+                    </>
+                ) : null}
                 <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title={t("canvas.createMenu.text")} description={t("canvas.createMenu.textDescription")} onClick={() => onCreate(CanvasNodeType.Text)} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title={t("canvas.createMenu.image")} onClick={() => onCreate(CanvasNodeType.Image)} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title={t("canvas.createMenu.video")} onClick={() => onCreate(CanvasNodeType.Video)} />
@@ -51,14 +67,19 @@ export function ConnectionCreateMenu({
     );
 }
 
-export function ConnectionCreateOption({ theme, icon, title, description, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; onClick?: () => void }) {
+export function ConnectionCreateOption({ theme, icon, title, description, disabled, hint, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: React.ReactNode; title: string; description?: string; disabled?: boolean; hint?: string; onClick?: () => void }) {
     return (
         <button
             type="button"
-            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition"
+            disabled={disabled}
+            title={hint}
+            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition disabled:cursor-not-allowed disabled:opacity-40"
             style={{ color: theme.node.text }}
             onClick={onClick}
-            onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
+            onMouseEnter={(event) => {
+                if (disabled) return;
+                event.currentTarget.style.background = theme.node.fill;
+            }}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
             <span className="grid size-11 shrink-0 place-items-center rounded-xl" style={{ background: theme.node.fill, color: theme.node.muted }}>

@@ -1382,6 +1382,7 @@ function InfiniteCanvasPage() {
             setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
             setDecomposeNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
+            setPreviewModel3dNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
             setExpandedBatchNodeIds((current) => new Set([...current].filter((nodeId) => !allIds.has(nodeId))));
@@ -1496,6 +1497,7 @@ function InfiniteCanvasPage() {
         setAngleNodeId(null);
         setDecomposeNodeId(null);
         setPreviewNodeId(null);
+        setPreviewModel3dNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
         setClearConfirmOpen(false);
@@ -2376,6 +2378,39 @@ function InfiniteCanvasPage() {
             }
         },
         [message, t],
+    );
+
+    const captureModel3dView = useCallback(
+        async (blob: Blob) => {
+            const node = previewModel3dNodeId ? nodesRef.current.find((item) => item.id === previewModel3dNodeId) : null;
+            if (!node || node.type !== CanvasNodeType.Model3d) return message.error(t("canvas.model3d.captureFailed"));
+            try {
+                const image = await uploadImage(blob);
+                const size = fitNodeSize(image.width, image.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const id = nanoid();
+                const x = node.position.x + node.width + 96;
+                let y = node.position.y + node.height / 2 - size.height / 2;
+                while (nodesRef.current.some((item) => item.id !== node.id && item.position.x < x + size.width && item.position.x + item.width > x && item.position.y < y + size.height && item.position.y + item.height > y)) y += size.height + 24;
+                const child: CanvasNodeData = {
+                    id,
+                    type: CanvasNodeType.Image,
+                    title: t("canvas.model3d.captureTitle", { name: node.title || t("canvas.nodeTypes.model3d") }),
+                    position: { x, y },
+                    ...size,
+                    metadata: imageMetadata(image),
+                };
+                setNodes((prev) => [...prev, child]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: id }]);
+                setSelectedNodeIds(new Set([id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(id);
+                setPreviewModel3dNodeId(null);
+                message.success(t("canvas.model3d.captured"));
+            } catch {
+                message.error(t("canvas.model3d.captureFailed"));
+            }
+        },
+        [message, previewModel3dNodeId, t],
     );
 
     const saveNodeAsset = useCallback(
@@ -4066,7 +4101,19 @@ function InfiniteCanvasPage() {
                             <rect width="100%" height="100%" fill={theme.canvas.selectionFill} stroke={theme.canvas.selectionStroke} strokeOpacity={0.55} strokeWidth={1 / viewport.k} strokeDasharray={`${6 / viewport.k} ${4 / viewport.k}`} />
                         </svg>
                     ) : null}
-                    {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
+                    {pendingConnectionCreate ? (
+                        <ConnectionCreateMenu
+                            pending={pendingConnectionCreate}
+                            sourceNode={nodeById.get(pendingConnectionCreate.connection.nodeId)}
+                            onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)}
+                            onModel3dOp={(op) => {
+                                const sourceId = pendingConnectionCreate.connection.nodeId;
+                                cancelPendingConnectionCreate();
+                                setModel3dOpTarget({ nodeId: sourceId, op });
+                            }}
+                            onClose={cancelPendingConnectionCreate}
+                        />
+                    ) : null}
                     {nodeCreatePosition ? (
                         <NodeCreateMenu
                             position={nodeCreatePosition}
@@ -4269,6 +4316,7 @@ function InfiniteCanvasPage() {
                                 mimeType={previewModel3dNode.metadata.mimeType}
                                 quad={previewModel3dNode.metadata.model3dQuad === "true"}
                                 showControls
+                                onCaptureView={(blob) => void captureModel3dView(blob)}
                             />
                         </div>
                     ) : null}

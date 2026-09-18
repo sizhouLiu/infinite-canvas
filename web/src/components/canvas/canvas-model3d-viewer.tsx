@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bone, Grid3x3, Package, Palette, Pause, Play, RotateCcw } from "lucide-react";
+import { Bone, Camera, Grid3x3, Package, Palette, Pause, Play, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CanvasTheme } from "@/lib/canvas-theme";
@@ -234,9 +234,11 @@ type Model3dViewerProps = {
      * it is not rendering live. Passing it turns on the readable drawing buffer, so it is left off elsewhere.
      */
     onThumbnail?: (blob: Blob) => void;
+    /** Export the view as it currently appears, including orbit, pan, zoom, and the active render mode. */
+    onCaptureView?: (blob: Blob) => void;
 };
 
-export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType, quad = false, showControls = false, onThumbnail }: Model3dViewerProps) {
+export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType, quad = false, showControls = false, onThumbnail, onCaptureView }: Model3dViewerProps) {
     const { t } = useTranslation();
     const mountRef = useRef<HTMLDivElement>(null);
     const controlsRef = useRef<any>(null);
@@ -244,6 +246,9 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
     const mixerRef = useRef<any>(null);
     const actionsRef = useRef<any[]>([]);
     const resetCameraRef = useRef<(() => void) | null>(null);
+    const captureViewRef = useRef<(() => Promise<Blob>) | null>(null);
+    const fillRef = useRef(theme.node.fill);
+    fillRef.current = theme.node.fill;
     // Requests one more frame from the on-demand loop after something outside it changes the scene.
     const invalidateRef = useRef<(() => void) | null>(null);
     const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -334,6 +339,24 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                         controls.update();
                         invalidateRef.current?.();
                     };
+                    // Render one frame and read it immediately, so capture works without a preserved drawing buffer.
+                    captureViewRef.current = () =>
+                        new Promise<Blob>((resolve, reject) => {
+                            renderer.render(scene, camera);
+                            const source: HTMLCanvasElement = renderer.domElement;
+                            const output = document.createElement("canvas");
+                            output.width = source.width;
+                            output.height = source.height;
+                            const context = output.getContext("2d");
+                            if (!context) {
+                                reject(new Error("Failed to capture view"));
+                                return;
+                            }
+                            context.fillStyle = fillRef.current;
+                            context.fillRect(0, 0, output.width, output.height);
+                            context.drawImage(source, 0, 0);
+                            output.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Failed to capture view"))), "image/png");
+                        });
 
                     // Keep the shipped materials so the shaded mode can be restored after a mode switch.
                     const originalMaterials = new Map<string, any>();
@@ -471,6 +494,7 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
             controlsRef.current = null;
             applyModeRef.current = null;
             resetCameraRef.current = null;
+            captureViewRef.current = null;
             invalidateRef.current = null;
             mixerRef.current?.stopAllAction?.();
             mixerRef.current = null;
@@ -598,6 +622,21 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                                     {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
                                 </button>
                             </>
+                        ) : null}
+                        {onCaptureView ? (
+                            <button
+                                type="button"
+                                title={t("canvas.model3d.captureView")}
+                                className="rounded p-1.5 transition-opacity hover:opacity-80"
+                                style={{ color: theme.node.text }}
+                                onClick={() => {
+                                    const capture = captureViewRef.current;
+                                    if (!capture) return;
+                                    void capture().then(onCaptureView).catch(() => undefined);
+                                }}
+                            >
+                                <Camera className="size-3.5" />
+                            </button>
                         ) : null}
                         <button type="button" title={t("canvas.model3d.resetCamera")} className="rounded p-1.5 transition-opacity hover:opacity-80" style={{ color: theme.node.text }} onClick={() => resetCameraRef.current?.()}>
                             <RotateCcw className="size-3.5" />
