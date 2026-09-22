@@ -2,7 +2,8 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "@/types/canvas";
+import { getConnectionEndpoint, nearestViewHandle } from "@/lib/canvas/canvas-node-geometry";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle, type Position } from "@/types/canvas";
 
 export function ConnectionPath({
     connection,
@@ -25,10 +26,12 @@ export function ConnectionPath({
     onLabelClick?: (event: ReactMouseEvent<SVGGElement>) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const startX = from.position.x + from.width;
-    const startY = from.position.y + from.height / 2;
-    const endX = to.position.x;
-    const endY = to.position.y + to.height / 2;
+    const start = getConnectionEndpoint(from, "source");
+    const end = getConnectionEndpoint(to, "target", connection.toHandle);
+    const startX = start.x;
+    const startY = start.y;
+    const endX = end.x;
+    const endY = end.y;
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
@@ -86,14 +89,18 @@ export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { nod
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (!node) return null;
 
-    const startX = handle.handleType === "source" ? node.position.x + node.width : mouseWorld.x;
-    const startY = handle.handleType === "source" ? node.position.y + node.height / 2 : mouseWorld.y;
-    const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x;
-    const endY = handle.handleType === "source" ? mouseWorld.y : node.position.y + node.height / 2;
-    const snappedStartX = handle.handleType === "target" && target ? target.position.x + target.width : startX;
-    const snappedStartY = handle.handleType === "target" && target ? target.position.y + target.height / 2 : startY;
-    const snappedEndX = handle.handleType === "source" && target ? target.position.x : endX;
-    const snappedEndY = handle.handleType === "source" && target ? target.position.y + target.height / 2 : endY;
+    const fromPoint = handle.handleType === "source" ? getConnectionEndpoint(node, "source") : getConnectionEndpoint(node, "target", handle.view);
+    const startX = handle.handleType === "source" ? fromPoint.x : mouseWorld.x;
+    const startY = handle.handleType === "source" ? fromPoint.y : mouseWorld.y;
+    const endX = handle.handleType === "source" ? mouseWorld.x : fromPoint.x;
+    const endY = handle.handleType === "source" ? mouseWorld.y : fromPoint.y;
+    const snapView = handle.view || (handle.handleType === "source" && target?.type === CanvasNodeType.Model3d && node.type !== CanvasNodeType.Group ? nearestViewHandle(target, mouseWorld.y) : undefined);
+    const snappedStart = handle.handleType === "target" && target ? getConnectionEndpoint(target, "source") : { x: startX, y: startY };
+    const snappedEnd = handle.handleType === "source" && target ? getConnectionEndpoint(target, "target", snapView) : { x: endX, y: endY };
+    const snappedStartX = snappedStart.x;
+    const snappedStartY = snappedStart.y;
+    const snappedEndX = snappedEnd.x;
+    const snappedEndY = snappedEnd.y;
     const distance = Math.abs(snappedEndX - snappedStartX);
     const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
 

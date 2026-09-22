@@ -57,6 +57,7 @@ export type AiConfig = {
     quality: string;
     size: string;
     background: string;
+    imageTemplate: string;
     count: string;
     canvasImageCount: string;
     proxyEnabled: boolean;
@@ -156,6 +157,7 @@ export const defaultConfig: AiConfig = {
     quality: "auto",
     size: "1:1",
     background: "",
+    imageTemplate: "",
     count: "1",
     canvasImageCount: "3",
     proxyEnabled: Boolean(HOSTED_PROXY_URL),
@@ -324,6 +326,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" ? "reference" : "frames",
+                        imageTemplate: config.imageTemplate || "",
                         canvasImageCount: config.canvasImageCount || "3",
                         proxyEnabled: HOSTED_PROXY_URL ? true : Boolean(config.proxyEnabled),
                         proxyUrl: HOSTED_PROXY_URL || config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,

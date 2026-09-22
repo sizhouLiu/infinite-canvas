@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { requestEdit, requestGeneration, requestImageQuestion, supportsTransparentBackground } from "@/services/api/image";
+import { resolveTripoImageTemplate } from "@/services/api/tripo-image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createModel3dTask, isModel3dTaskFailed, model3dRequestOptions, storeGeneratedModel3d, storeModel3dPreview, uploadModel3dImage, waitForModel3dTask, type Model3dResult } from "@/services/api/model3d";
 import {
@@ -82,9 +83,10 @@ import { BUILTIN_MULTIVIEW_VIEWS, multiviewDelay, multiviewPrompt, retryAfterSec
 import { splitModel3dParts } from "@/lib/canvas/canvas-model3d-parts";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, buildModel3dGenerationMetadata, createCanvasNode, imageMetadata, model3dMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
-import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, getGroupWrapRect, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
+import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, getGroupWrapRect, nearestViewHandle, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
     assignMultiviewViews,
+    nodesWithSocketViews,
     audioExtension,
     buildAngleLabel,
     buildAnglePrompt,
@@ -143,6 +145,7 @@ type CanvasClipboard = {
 type ConnectionDropTarget = {
     nodeId: string | null;
     isNearNode: boolean;
+    view?: MultiviewView;
 };
 
 type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
@@ -1081,43 +1084,117 @@ function InfiniteCanvasPage() {
 
     const hideNodeToolbar = useCallback(() => {}, []);
 
+    /**
+     * Reassigns which multiview angle an image feeds. When the chosen angle already belongs to another image of the same
+     * 3D node the two swap rather than one overwriting the other: the set of angles stays intact, so front stays claimed
+     * and Tripo's "front view is required" cannot be tripped by an edit here.
+     */
+    const applyViewSwap = useCallback((nodeId: string, view: MultiviewView, assignment: Array<{ nodeId: string; view?: MultiviewView }>) => {
+        const current = assignment.find((item) => item.nodeId === nodeId);
+        const occupant = assignment.find((item) => item.nodeId !== nodeId && item.view === view);
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id === nodeId) return { ...node, metadata: { ...node.metadata, multiviewView: view } };
+                if (occupant && node.id === occupant.nodeId) return { ...node, metadata: { ...node.metadata, multiviewView: current?.view } };
+                return node;
+            }),
+        );
+        setConnections((prev) =>
+            prev.map((connection) => {
+                if (connection.fromNodeId === nodeId && connection.toHandle) return { ...connection, toHandle: view };
+                if (occupant && current?.view && connection.fromNodeId === occupant.nodeId && connection.toHandle === view) return { ...connection, toHandle: current.view };
+                if (occupant && !current?.view && connection.fromNodeId === occupant.nodeId && connection.toHandle === view) {
+                    const { toHandle: _dropped, ...rest } = connection;
+                    return rest;
+                }
+                return connection;
+            }),
+        );
+    }, []);
+
+    const assignMultiviewView = useCallback(
+        (nodeId: string, view: MultiviewView) => {
+            if (multiviewViewMenu) applyViewSwap(nodeId, view, multiviewViewMenu.assignment);
+            else {
+                const node = nodesRef.current.find((item) => item.id === nodeId);
+                const groupId = node?.metadata?.groupId;
+                const assignment = groupId
+                    ? nodesRef.current
+                          .filter((item) => item.metadata?.groupId === groupId && item.type === CanvasNodeType.Image)
+                          .map((item) => ({ nodeId: item.id, view: item.metadata?.multiviewView }))
+                    : [];
+                applyViewSwap(nodeId, view, assignment);
+            }
+            setMultiviewViewMenu(null);
+        },
+        [applyViewSwap, multiviewViewMenu],
+    );
+
+    /**
+     * A loose image plugged into a 3D view socket claims that angle. If another image already occupies the same
+     * socket on this 3D node, the two swap — one socket, one image, matching Shader Editor.
+     */
+    const applyViewFromConnection = useCallback(
+        (fromNodeId: string, toNodeId: string, toHandle?: MultiviewView) => {
+            if (!toHandle) return;
+            const from = nodesRef.current.find((node) => node.id === fromNodeId);
+            const to = nodesRef.current.find((node) => node.id === toNodeId);
+            // createConnectedNode adds the new node in the same tick, so it is not in nodesRef yet.
+            if (from && from.type !== CanvasNodeType.Image) return;
+            if (to && to.type !== CanvasNodeType.Model3d) return;
+            const previous = connectionsRef.current.find((connection) => connection.fromNodeId === fromNodeId && connection.toNodeId === toNodeId)?.toHandle || from?.metadata?.multiviewView;
+            const assignment = [
+                { nodeId: fromNodeId, view: previous },
+                ...connectionsRef.current
+                    .filter((connection) => connection.toNodeId === toNodeId && connection.toHandle && connection.fromNodeId !== fromNodeId)
+                    .map((connection) => ({ nodeId: connection.fromNodeId, view: connection.toHandle })),
+            ];
+            applyViewSwap(fromNodeId, toHandle, assignment);
+        },
+        [applyViewSwap],
+    );
+
     const connectNodes = useCallback(
         (current: ConnectionHandle, targetNodeId: string) => {
             if (current.nodeId === targetNodeId) return;
 
-            const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType);
+            const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType, current.view);
             if (!connection) {
                 message.warning(t("canvas.projectPage.configConnection"));
                 return;
             }
-            const { fromNodeId, toNodeId, kind } = connection;
+            const { fromNodeId, toNodeId, kind, toHandle } = connection;
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId, ...(kind ? { kind } : {}) }]);
+                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId, ...(kind ? { kind } : {}), ...(toHandle ? { toHandle } : {}) }]);
+            } else if (toHandle) {
+                setConnections((prev) => prev.map((conn) => (conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId ? { ...conn, toHandle } : conn)));
             }
+            applyViewFromConnection(fromNodeId, toNodeId, toHandle);
             setContextMenu(null);
         },
-        [message, t],
+        [applyViewFromConnection, message, t],
     );
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d, pending: PendingConnectionCreate) => {
             const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
-            const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
+            const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType, pending.connection.view);
             if (!connection) {
                 message.warning(t("canvas.projectPage.configConnection"));
                 return;
             }
             setNodes((prev) => [...prev, newNode]);
             setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
+            applyViewFromConnection(connection.fromNodeId, connection.toNodeId, connection.toHandle);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting, t],
+        [applyViewFromConnection, effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting, t],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {
@@ -1135,10 +1212,13 @@ function InfiniteCanvasPage() {
             let bestNodeId: string | null = null;
             let bestPriority = Number.POSITIVE_INFINITY;
 
+            let bestView: MultiviewView | undefined;
+            const sourceNode = nodesRef.current.find((node) => node.id === current.nodeId);
             [...nodesRef.current]
                 .reverse()
                 .forEach((node) => {
-                    const anchor = getConnectionTargetAnchor(node, current);
+                    const snapView = node.type === CanvasNodeType.Model3d && current.handleType === "source" && sourceNode?.type !== CanvasNodeType.Group ? current.view || nearestViewHandle(node, world.y) : current.view;
+                    const anchor = getConnectionTargetAnchor(node, { ...current, view: snapView }, world.y);
                     const dx = world.x - anchor.x;
                     const dy = world.y - anchor.y;
                     const hitsHandle = dx * dx + dy * dy <= handleRadius * handleRadius;
@@ -1147,16 +1227,17 @@ function InfiniteCanvasPage() {
 
                     if (!hitsHandle && !hitsInside && !hitsExpanded) return;
                     isNearNode = true;
-                    if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType)) return;
+                    if (node.id === current.nodeId || !normalizeConnection(current.nodeId, node.id, nodesRef.current, current.handleType, snapView)) return;
 
                     const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
                     if (priority < bestPriority) {
                         bestNodeId = node.id;
                         bestPriority = priority;
+                        bestView = snapView;
                     }
                 });
 
-            return { nodeId: bestNodeId, isNearNode };
+            return { nodeId: bestNodeId, isNearNode, view: bestView };
         },
         [screenToCanvas],
     );
@@ -1947,7 +2028,7 @@ function InfiniteCanvasPage() {
             if (currentConnection) {
                 const dropTarget = getConnectionDropTarget(event.clientX, event.clientY, currentConnection);
                 if (dropTarget.nodeId) {
-                    connectNodes(currentConnection, dropTarget.nodeId);
+                    connectNodes({ ...currentConnection, view: dropTarget.view || currentConnection.view }, dropTarget.nodeId);
                     setConnecting(null);
                 } else if (dropTarget.isNearNode) {
                     setConnecting(null);
@@ -2169,10 +2250,10 @@ function InfiniteCanvasPage() {
     }, [copySelectedNodes, deleteConnection, deleteNodes, groupSelection, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas, ungroupSelection]);
 
     const handleConnectStart = useCallback(
-        (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
+        (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target", view?: MultiviewView) => {
             event.stopPropagation();
             setMouseWorld(screenToCanvas(event.clientX, event.clientY));
-            setConnecting({ nodeId, handleType });
+            setConnecting({ nodeId, handleType, ...(view ? { view } : {}) });
             connectionTargetNodeIdRef.current = null;
             setConnectionTargetNodeId(null);
             setSelectedConnectionId(null);
@@ -2295,26 +2376,6 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
     }, []);
 
-    /**
-     * Reassigns which multiview angle an image feeds. When the chosen angle already belongs to another image of the same
-     * 3D node the two swap rather than one overwriting the other: the set of angles stays intact, so front stays claimed
-     * and Tripo's "front view is required" cannot be tripped by an edit here.
-     */
-    const assignMultiviewView = useCallback(
-        (nodeId: string, view: MultiviewView) => {
-            const current = multiviewViewMenu?.assignment.find((item) => item.nodeId === nodeId);
-            const occupant = multiviewViewMenu?.assignment.find((item) => item.nodeId !== nodeId && item.view === view);
-            setNodes((prev) =>
-                prev.map((node) => {
-                    if (node.id === nodeId) return { ...node, metadata: { ...node.metadata, multiviewView: view } };
-                    if (occupant && node.id === occupant.nodeId && current) return { ...node, metadata: { ...node.metadata, multiviewView: current.view } };
-                    return node;
-                }),
-            );
-            setMultiviewViewMenu(null);
-        },
-        [multiviewViewMenu],
-    );
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
@@ -3328,7 +3389,7 @@ function InfiniteCanvasPage() {
 
                         let result: Model3dResult & { taskId: string };
                         if (multiview) {
-                            const assigned = assignMultiviewViews(usable, nodesRef.current);
+                            const assigned = assignMultiviewViews(usable, nodesWithSocketViews(nodesRef.current, connectionsRef.current, model3dId));
                             const views = tokens.map((input, index) => ({ view: assigned[index], input }));
                             const opResult = await requestMultiviewToModel(generationConfig, views, { model: generationConfig.model, ...model3dRequestOptions(generationConfig) }, { signal: controller.signal, onTaskCreated });
                             result = { ...opResult, mimeType: "model/gltf-binary" };
@@ -3561,6 +3622,7 @@ function InfiniteCanvasPage() {
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           background: savedImageMetadata.background ?? effectiveConfig.background,
+                          imageTemplate: savedImageMetadata.imageTemplate ?? effectiveConfig.imageTemplate,
                           count: "1",
                       }
                     : { ...nodeGenerationConfig(sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
@@ -3579,7 +3641,7 @@ function InfiniteCanvasPage() {
             // and audio always, and an image or 3D model with nothing to edit. An image-to-3D or image-edit run
             // carries its instruction in the reference images, so a prompt-free generation must stay retryable —
             // refusing every empty prompt here left such a failed node with no way back.
-            const promptRequired = node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Audio || !useReferenceImages;
+            const promptRequired = node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Audio || (!useReferenceImages && !resolveTripoImageTemplate(generationConfig.imageTemplate));
             if (!prompt && promptRequired) {
                 message.warning(t("canvas.projectPage.retryPromptMissing"));
                 return;
@@ -4066,6 +4128,7 @@ function InfiniteCanvasPage() {
                             onHoverStart={handleNodeHoverStart}
                             onHoverEnd={handleNodeHoverEnd}
                             onConnectStart={handleConnectStart}
+                            onAssignMultiviewView={assignMultiviewView}
                             onResizeStart={handleNodeResizeStart}
                             onResize={handleNodeResize}
                             onResizeEnd={handleNodeResizeEnd}

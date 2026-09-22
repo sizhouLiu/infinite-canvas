@@ -14,6 +14,7 @@ import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
 import { audioConfigPatch, videoConfigPatch } from "./canvas-node-parameter-rows";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
+import { resolveTripoImageTemplate } from "@/services/api/tripo-image";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 type CanvasConfigNodePanelProps = {
@@ -39,7 +40,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const canGenerate = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const canGenerate = hasComposerContent || (mode === "image" && Boolean(resolveTripoImageTemplate(config.imageTemplate))) || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
 
     return (
         <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>

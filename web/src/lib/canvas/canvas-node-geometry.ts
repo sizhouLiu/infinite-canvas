@@ -1,4 +1,27 @@
+import { MULTIVIEW_VIEWS, type MultiviewView } from "@/services/api/model3d-ops";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle } from "@/types/canvas";
+
+/** Vertical inset from the node top/bottom to the first/last of the four left-side view sockets. */
+const VIEW_HANDLE_INSET = 36;
+
+export function isMultiviewView(value: string | undefined): value is MultiviewView {
+    return Boolean(value && (MULTIVIEW_VIEWS as readonly string[]).includes(value));
+}
+
+/**
+ * World Y of a 3D node's left-side view socket. Four sockets sit in a vertical stack (front / left / back / right)
+ * so a drag can land on one angle the way a Shader Editor input does, rather than sharing a single mid-left handle.
+ */
+export function getViewHandleY(node: CanvasNodeData, view: MultiviewView) {
+    const index = MULTIVIEW_VIEWS.indexOf(view);
+    const span = Math.max(node.height - VIEW_HANDLE_INSET * 2, 0);
+    const step = MULTIVIEW_VIEWS.length > 1 ? span / (MULTIVIEW_VIEWS.length - 1) : 0;
+    return node.position.y + VIEW_HANDLE_INSET + index * step;
+}
+
+export function nearestViewHandle(node: CanvasNodeData, worldY: number): MultiviewView {
+    return MULTIVIEW_VIEWS.reduce((best, view) => (Math.abs(getViewHandleY(node, view) - worldY) < Math.abs(getViewHandleY(node, best) - worldY) ? view : best), MULTIVIEW_VIEWS[0]);
+}
 
 export function nodeBounds(nodes: CanvasNodeData[]) {
     return nodes.reduce(
@@ -130,22 +153,39 @@ export function findContainingGroupId(node: CanvasNodeData, nodes: CanvasNodeDat
     );
 }
 
-export function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle) {
+export function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle, worldY?: number) {
+    const view = current.view || (node.type === CanvasNodeType.Model3d && current.handleType === "source" && worldY != null ? nearestViewHandle(node, worldY) : undefined);
     return {
         x: current.handleType === "source" ? node.position.x : node.position.x + node.width,
-        y: node.position.y + node.height / 2,
+        y: view && node.type === CanvasNodeType.Model3d ? getViewHandleY(node, view) : node.position.y + node.height / 2,
     };
 }
 
-export function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target") {
+export function getConnectionEndpoint(node: CanvasNodeData, side: "source" | "target", view?: MultiviewView) {
+    return {
+        x: side === "source" ? node.position.x + node.width : node.position.x,
+        y: view && node.type === CanvasNodeType.Model3d && side === "target" ? getViewHandleY(node, view) : node.position.y + node.height / 2,
+    };
+}
+
+export function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target", view?: MultiviewView) {
     const first = nodes.find((node) => node.id === firstNodeId);
     const second = nodes.find((node) => node.id === secondNodeId);
     if (!first || !second || first.id === second.id) return null;
-    if (second.type === CanvasNodeType.Group) return null;
+    // A group is a source, never a generation target. Dragging out of a 3D socket onto a group still means the group feeds the 3D node.
+    if (second.type === CanvasNodeType.Group) {
+        if (firstHandleType === "target" && first.type === CanvasNodeType.Model3d) return { fromNodeId: second.id, toNodeId: first.id };
+        return null;
+    }
     if (first.type === CanvasNodeType.Config && second.type === CanvasNodeType.Config) return null;
     if (second.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
     if (first.type === CanvasNodeType.Config && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
     // Drawn out of a config node: it feeds the target's generation parameters rather than acting as a fan-in hub.
     if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id, kind: "parameter" as const };
-    return { fromNodeId: first.id, toNodeId: second.id };
+    // Dragging out of a 3D view socket toward an image still means the image feeds that socket.
+    if (firstHandleType === "target" && first.type === CanvasNodeType.Model3d && second.type !== CanvasNodeType.Model3d) {
+        return { fromNodeId: second.id, toNodeId: first.id, ...(view && second.type !== CanvasNodeType.Group ? { toHandle: view } : {}) };
+    }
+    const toHandle = second.type === CanvasNodeType.Model3d && first.type !== CanvasNodeType.Group ? view : undefined;
+    return { fromNodeId: first.id, toNodeId: second.id, ...(toHandle ? { toHandle } : {}) };
 }

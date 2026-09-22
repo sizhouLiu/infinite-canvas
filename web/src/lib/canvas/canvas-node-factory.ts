@@ -60,6 +60,7 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         size: config.size,
         quality: config.quality,
         ...(config.background ? { background: config.background } : {}),
+        ...(config.imageTemplate ? { imageTemplate: config.imageTemplate } : {}),
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };

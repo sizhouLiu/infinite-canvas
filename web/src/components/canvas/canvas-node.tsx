@@ -10,6 +10,7 @@ import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { MULTIVIEW_VIEWS, type MultiviewView } from "@/services/api/model3d-ops";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeImage, type CanvasNodeText, type Position } from "@/types/canvas";
 import type { CanvasNodeContext, CanvasPluginHost } from "@/types/canvas-plugin";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -41,7 +42,8 @@ type CanvasNodeProps = {
     onSelectCapture?: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
-    onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
+    onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target", view?: MultiviewView) => void;
+    onAssignMultiviewView?: (nodeId: string, view: MultiviewView) => void;
     onResizeStart: (nodeId: string) => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onResizeEnd: (nodeId: string) => void;
@@ -84,6 +86,7 @@ type NodeContentRendererProps = {
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
     onViewBatchImage?: (imageId: string) => void;
+    onAssignMultiviewView?: (view: MultiviewView) => void;
     groupChildCount: number;
 };
 
@@ -110,6 +113,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onHoverStart,
     onHoverEnd,
     onConnectStart,
+    onAssignMultiviewView,
     onResizeStart,
     onResize,
     onResizeEnd,
@@ -436,6 +440,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onRetryBatchImage={(imageId) => onRetryBatchImage?.(data, imageId)}
                         onDeleteBatchImage={(imageId) => onDeleteBatchImage?.(data.id, imageId)}
                         onViewBatchImage={(imageId) => onViewImage?.(data, imageId)}
+                        onAssignMultiviewView={data.type === CanvasNodeType.Image && data.metadata?.groupId ? (view) => onAssignMultiviewView?.(data.id, view) : undefined}
                         groupChildCount={groupChildCount}
                     />
                 </div>
@@ -456,7 +461,18 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {!referenceSelectionState ? <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} /> : null}
             </div>
 
-            {!referenceSelectionState && !isGroup ? <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} /> : null}
+            {!referenceSelectionState && !isGroup && data.type !== CanvasNodeType.Model3d ? <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} /> : null}
+            {!referenceSelectionState && data.type === CanvasNodeType.Model3d
+                ? MULTIVIEW_VIEWS.map((view) => (
+                    <ConnectionHandleDot
+                        key={view}
+                        side="left"
+                        view={view}
+                        visible={hovered || isSelected || isConnecting}
+                        onMouseDown={(event) => onConnectStart(event, data.id, "target", view)}
+                    />
+                ))
+                : null}
             {!referenceSelectionState && (definition?.hasSourceHandle ?? true) ? <ConnectionHandleDot side="right" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /> : null}
 
             {showPanel && !isGroup && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[600px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
@@ -696,6 +712,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             onRetryBatchImage={props.onRetryBatchImage}
             onDeleteBatchImage={props.onDeleteBatchImage}
             onViewBatchImage={props.onViewBatchImage}
+            onAssignMultiviewView={props.onAssignMultiviewView}
         />
     );
 }
@@ -842,6 +859,7 @@ function ImageContent({
     onRetryBatchImage,
     onDeleteBatchImage,
     onViewBatchImage,
+    onAssignMultiviewView,
 }: {
     node: CanvasNodeData;
     batchExpanded: boolean;
@@ -852,6 +870,7 @@ function ImageContent({
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
     onViewBatchImage?: (imageId: string) => void;
+    onAssignMultiviewView?: (view: MultiviewView) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
@@ -883,8 +902,9 @@ function ImageContent({
                 )}
             </div>
             {primaryImage?.status === "error" ? <BatchImageFailureActions placement="left" onRetry={() => onRetryBatchImage?.(primaryImage.id)} onDelete={() => onDeleteBatchImage?.(primaryImage.id)} /> : null}
+            {onAssignMultiviewView ? <GroupedViewBadge view={node.metadata?.multiviewView} onAssign={onAssignMultiviewView} /> : null}
             {primaryImage?.content ? (
-                <button type="button" className="absolute left-2.5 top-2.5 z-30 flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-medium shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownloadBatchImage?.(primaryImage.id))}>
+                <button type="button" className={`absolute ${onAssignMultiviewView ? "left-[88px]" : "left-2.5"} top-2.5 z-30 flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-medium shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]`} style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }} title={t("common.download")} onClick={(event) => (event.stopPropagation(), onDownloadBatchImage?.(primaryImage.id))}>
                     <Download className="size-3" />
                     {t("common.download")}
                 </button>
@@ -1050,17 +1070,51 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function GroupedViewBadge({ view, onAssign }: { view?: MultiviewView; onAssign: (view: MultiviewView) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const { t } = useTranslation();
+    const cycle = () => {
+        const index = view ? MULTIVIEW_VIEWS.indexOf(view) : -1;
+        onAssign(MULTIVIEW_VIEWS[(index + 1) % MULTIVIEW_VIEWS.length]);
+    };
+    return (
+        <button
+            type="button"
+            className="absolute left-2.5 top-2.5 z-30 flex h-8 items-center rounded-lg border px-2 text-[10px] font-medium shadow-[0_6px_18px_rgba(15,23,42,.16)] backdrop-blur-md transition hover:scale-[1.02]"
+            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.activeText }}
+            title={t("canvas.multiview.assignTitle")}
+            onClick={(event) => {
+                event.stopPropagation();
+                cycle();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+        >
+            {view ? t(`canvas.model3dOps.views.${view}`) : t("canvas.multiview.unassigned")}
+        </button>
+    );
+}
+
+const VIEW_HANDLE_INSET_PERCENT = "36px";
+
+function ConnectionHandleDot({ side, visible, view, onMouseDown }: { side: "left" | "right"; visible: boolean; view?: MultiviewView; onMouseDown: (event: React.MouseEvent) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const { t } = useTranslation();
+    const index = view ? MULTIVIEW_VIEWS.indexOf(view) : -1;
+    const top = view ? `calc(${VIEW_HANDLE_INSET_PERCENT} + ${index} * (100% - ${VIEW_HANDLE_INSET_PERCENT} * 2) / 3)` : "50%";
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
-                side === "left" ? "-left-6" : "-right-6"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            className={`absolute z-30 flex ${view ? "h-10 w-16 -translate-y-1/2" : "size-12 -translate-y-1/2"} cursor-crosshair items-center ${side === "left" ? "-left-6 justify-start" : "-right-6 justify-end"} transition-opacity duration-150 ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            style={{ top }}
             onMouseDown={onMouseDown}
         >
-            <div className="size-3 rounded-full border-2 transition-all hover:scale-125" style={{ background: theme.node.panel, borderColor: theme.node.muted }} />
+            <div className="size-3 shrink-0 rounded-full border-2 transition-all hover:scale-125" style={{ background: theme.node.panel, borderColor: theme.node.muted }} />
+            {view ? (
+                <span className="ml-1 whitespace-nowrap text-[10px] font-medium" style={{ color: theme.node.muted }}>
+                    {t(`canvas.model3dOps.views.${view}`)}
+                </span>
+            ) : null}
         </div>
     );
 }

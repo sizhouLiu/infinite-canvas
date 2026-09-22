@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, readMediaDimensions } from "@/lib/media-size";
-import type { AiConfig } from "@/stores/use-config-store";
+import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { resolveTripoImageTemplate, TRIPO_IMAGE_TEMPLATES } from "@/services/api/tripo-image";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -21,7 +22,7 @@ export const imageScaleOptions = mediaScaleOptions.map((value) => ({ value, labe
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count" | "background", value: string) => void;
+    onConfigChange: (key: "quality" | "size" | "count" | "background" | "imageTemplate", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -36,6 +37,8 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const transparentBackground = config.background === "transparent";
+    const showTemplate = resolveModelRequestConfig(config, config.model || config.imageModel).apiFormat === "tripo";
+    const imageTemplate = resolveTripoImageTemplate(config.imageTemplate) || "";
     const selectedScale = inferMediaScale(activeSize);
     const selectedRatio = inferMediaRatio(activeSize);
     const dimensions = readMediaDimensions(activeSize, selectedScale, selectedRatio);
@@ -128,6 +131,26 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
                     </span>
                 </div>
+                {showTemplate ? (
+                    <div className="space-y-2.5">
+                        <div className="space-y-0.5">
+                            <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.template")}</SettingTitle>
+                            <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
+                                {t("settingsPanels.image.templateHint")}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2.5">
+                            <OptionPill selected={!imageTemplate} theme={theme} onClick={() => onConfigChange("imageTemplate", "")}>
+                                {t("settingsPanels.image.templates.none")}
+                            </OptionPill>
+                            {TRIPO_IMAGE_TEMPLATES.map((value) => (
+                                <OptionPill key={value} selected={imageTemplate === value} theme={theme} onClick={() => onConfigChange("imageTemplate", value)}>
+                                    {t(`settingsPanels.image.templates.${value}`)}
+                                </OptionPill>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.count")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">

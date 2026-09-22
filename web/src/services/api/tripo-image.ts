@@ -16,6 +16,9 @@ export const TRIPO_IMAGE_MODELS = ["seedream_v5", "seedream_v4", "banana", "bana
 const QUALITY_MODELS = ["chat_image_2", "chat_image_2.5_flare", "chat_image_2.5_sunburst"];
 /** Only these accept `background`; others ignore it silently. */
 const BACKGROUND_MODELS = ["chat_image_2.5_flare", "chat_image_2.5_sunburst"];
+/** Edit templates. Setting one makes `prompt` optional. Unknown values are dropped rather than sent. */
+export const TRIPO_IMAGE_TEMPLATES = ["t_pose", "character_completion", "3d_enhance", "variants", "figure"] as const;
+export type TripoImageTemplate = (typeof TRIPO_IMAGE_TEMPLATES)[number];
 const QUALITY_TIERS_BY_MODEL: Record<string, string[]> = {
     chat_image_2: ["low", "medium", "high"],
     "chat_image_2.5_flare": ["low", "medium", "high", "xhigh", "max"],
@@ -31,6 +34,7 @@ export type TripoImageParams = {
     /** Either "WxH" pixels or a "W:H" ratio; routed to `size` or `aspect_ratio` depending on the model. */
     size?: string;
     background?: string;
+    template?: string;
 };
 
 export function supportsTripoQuality(model: string) {
@@ -39,6 +43,10 @@ export function supportsTripoQuality(model: string) {
 
 export function supportsTripoBackground(model: string) {
     return BACKGROUND_MODELS.includes(model);
+}
+
+export function resolveTripoImageTemplate(value: string | undefined): TripoImageTemplate | undefined {
+    return TRIPO_IMAGE_TEMPLATES.includes(value as TripoImageTemplate) ? (value as TripoImageTemplate) : undefined;
 }
 
 /** Tripo rejects `auto` outright — it prices the request up front — so an unknown tier is dropped. */
@@ -127,13 +135,16 @@ function resolveTripoBackground(model: string, background: string | undefined) {
 
 function tripoImageBody(config: AiConfig, prompt: string, params: TripoImageParams) {
     const model = config.model.trim();
+    const text = prompt.trim();
+    const template = resolveTripoImageTemplate(params.template);
     return {
         model,
-        prompt,
+        ...(text ? { prompt: text } : {}),
         output_format: "png",
         ...resolveTripoSizing(model, params.size, params.quality),
         ...(resolveTripoQuality(model, params.quality) ? { quality: resolveTripoQuality(model, params.quality) } : {}),
         ...resolveTripoBackground(model, params.background),
+        ...(template ? { template } : {}),
     };
 }
 
@@ -196,8 +207,8 @@ async function runTripoImageTasks(config: AiConfig, path: string, body: Record<s
 
 export async function requestTripoImageGeneration(config: AiConfig, prompt: string, count: number, params: TripoImageParams, options?: TripoRequestOptions) {
     assertTripoImageConfig(config);
-    if (!prompt.trim()) throw new Error(apiText("promptRequired"));
-    return runTripoImageTasks(config, "/generation/text-to-image", tripoImageBody(config, prompt.trim(), params), count, options);
+    if (!prompt.trim() && !resolveTripoImageTemplate(params.template)) throw new Error(apiText("promptRequired"));
+    return runTripoImageTasks(config, "/generation/text-to-image", tripoImageBody(config, prompt, params), count, options);
 }
 
 export async function requestTripoImageEdit(config: AiConfig, prompt: string, references: ReferenceImage[], count: number, params: TripoImageParams, options?: TripoRequestOptions) {
@@ -210,10 +221,12 @@ export async function requestTripoImageEdit(config: AiConfig, prompt: string, re
             return uploadTripoFile(config, file, options);
         }),
     );
+    // One image uses `input`; two or more use `inputs` only. Passing `input` as an array is ignored
+    // (live-checked: the task still ran as image-to-image with no images). Sending both duplicates
+    // the first token — the docs' multi-image example is `inputs` alone.
     const body = {
         ...tripoImageBody(config, prompt.trim(), params),
-        input: tokens[0],
-        ...(tokens.length > 1 ? { inputs: tokens } : {}),
+        ...(tokens.length === 1 ? { input: tokens[0] } : { inputs: tokens }),
     };
     return runTripoImageTasks(config, "/generation/image-to-image", body, count, options);
 }

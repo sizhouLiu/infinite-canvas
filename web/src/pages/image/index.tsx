@@ -16,6 +16,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
+import { resolveTripoImageTemplate } from "@/services/api/tripo-image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -102,7 +103,8 @@ export default function ImagePage() {
     const agentTaskIdRef = useRef<string | undefined>(undefined);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
+    const hasTemplate = Boolean(resolveTripoImageTemplate(effectiveConfig.imageTemplate));
+    const canGenerate = Boolean(prompt.trim()) || hasTemplate;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
     useEffect(() => {
@@ -151,7 +153,7 @@ export default function ImagePage() {
         const agentTaskId = agentTaskIdRef.current;
         agentTaskIdRef.current = undefined;
         const text = prompt.trim();
-        if (!text) {
+        if (!text && !hasTemplate) {
             message.error(t("imageWorkbench.promptRequired"));
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("imageWorkbench.promptRequired") });
             return;
@@ -306,7 +308,7 @@ export default function ImagePage() {
 
     const buildRequestSnapshot = () => {
         const text = prompt.trim();
-        if (!text) {
+        if (!text && !hasTemplate) {
             message.error(t("imageWorkbench.promptRequired"));
             return null;
         }
@@ -565,7 +567,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={{ ...config, model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );

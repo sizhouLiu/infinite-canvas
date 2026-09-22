@@ -16,6 +16,7 @@ import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "
 import { MULTIVIEW_VIEWS } from "@/services/api/model3d-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
+import { resolveTripoImageTemplate } from "@/services/api/tripo-image";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -51,9 +52,11 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const isEditingExistingContent = hasTextContent || hasImageContent;
     // Image-to-3D and multiview-to-3D take the upstream images alone, so 3D generation needs no prompt once an
     // image is connected — the request drops it anyway. The input is hidden rather than left there to be typed
-    // into and silently ignored; every other mode still requires a prompt.
+    // into and silently ignored. A Tripo image template also makes the prompt optional, but the box stays so a
+    // prompt can still be added on top of the template.
     const model3dImageCount = mode === "model3d" ? mentionReferences.filter((reference) => reference.kind === "image").length : 0;
-    const promptOptional = model3dImageCount > 0;
+    const hidePrompt = model3dImageCount > 0;
+    const promptOptional = hidePrompt || (mode === "image" && Boolean(resolveTripoImageTemplate(config.imageTemplate)));
     const model3dHint =
         model3dImageCount > MULTIVIEW_VIEWS.length
             ? t("canvas.promptPanel.model3dMultiviewTrimmedHint", { count: model3dImageCount, max: MULTIVIEW_VIEWS.length })
@@ -95,7 +98,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             onWheel={(event) => event.stopPropagation()}
         >
             <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
-            {promptOptional ? (
+            {hidePrompt ? (
                 <div className="flex h-40 w-full items-center justify-center rounded-xl px-4 text-center text-sm leading-5" style={{ color: theme.node.muted }}>
                     {model3dHint}
                 </div>
@@ -113,7 +116,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    {promptOptional ? null : (
+                    {hidePrompt ? null : (
                         <>
                             <Tooltip title={t("canvas.promptPanel.expandEditor")}>
                                 <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={openExpandedEditor} aria-label={t("canvas.promptPanel.expandEditor")} />
@@ -162,7 +165,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     inherited={parameterSource ? { title: parameterSource.title, onFocus: () => onFocusNode?.(parameterSource.nodeId), onDisconnect: () => onDisconnectReference?.(parameterSource.nodeId, node.id) } : undefined}
                 />
             ) : null}
-            <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded && !promptOptional} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
+            <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded && !hidePrompt} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
                     <CanvasPromptChipInput

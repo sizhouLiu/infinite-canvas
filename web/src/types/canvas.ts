@@ -61,6 +61,7 @@ export type CanvasNodeMetadata = {
     size?: string;
     quality?: string;
     background?: string;
+    imageTemplate?: string;
     count?: number;
     textCount?: number;
     texts?: CanvasNodeText[];
@@ -131,6 +132,11 @@ export type CanvasConnection = {
      * config node to the result it just produced, so the direction alone cannot tell the two apart.
      */
     kind?: "parameter";
+    /**
+     * Which of a 3D node's four left-side view sockets this connection lands on (front / left / back / right).
+     * Loose images plug into a socket; a group still uses one wire and marks views on its members instead.
+     */
+    toHandle?: MultiviewView;
 };
 
 export type CanvasAssistantReference = {
@@ -170,6 +176,8 @@ export type CanvasAssistantSession = {
 export type ConnectionHandle = {
     nodeId: string;
     handleType: "source" | "target";
+    /** Set when the drag starts from (or snaps to) one of a 3D node's four view sockets. */
+    view?: MultiviewView;
 };
 
 export type SelectionBox = {

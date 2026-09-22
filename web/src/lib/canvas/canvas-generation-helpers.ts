@@ -116,6 +116,7 @@ export const PARAMETER_METADATA_KEYS = [
     "quality",
     "size",
     "background",
+    "imageTemplate",
     "count",
     "textCount",
     "seconds",
@@ -154,6 +155,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         quality: metadata.quality || config.quality || defaultConfig.quality,
         size: metadata.size || config.size || defaultConfig.size,
         background: metadata.background ?? config.background ?? defaultConfig.background,
+        imageTemplate: metadata.imageTemplate ?? config.imageTemplate ?? defaultConfig.imageTemplate,
         videoSeconds: metadata.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: metadata.vquality || config.vquality || defaultConfig.vquality,
         videoGenerateAudio: metadata.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
@@ -212,6 +214,24 @@ export function assignMultiviewViews(images: ReferenceImage[], nodes: CanvasNode
 }
 
 /**
+ * Loose images plugged into a 3D view socket carry that angle on the connection. Overlay it onto the image
+ * node's own metadata so assignMultiviewViews sees the socket as the source of truth for that image.
+ * Group wires have no toHandle; their members keep the badge they were marked with.
+ */
+export function nodesWithSocketViews(nodes: CanvasNodeData[], connections: CanvasConnection[], nodeId: string) {
+    const socketViews = new Map<string, MultiviewView>();
+    connections.forEach((connection) => {
+        if (connection.toNodeId !== nodeId || !connection.toHandle) return;
+        socketViews.set(connection.fromNodeId, connection.toHandle);
+    });
+    if (!socketViews.size) return nodes;
+    return nodes.map((node) => {
+        const socketView = socketViews.get(node.id);
+        return socketView ? { ...node, metadata: { ...node.metadata, multiviewView: socketView } } : node;
+    });
+}
+
+/**
  * The angle each upstream image feeds a 3D node, resolved the same way the request itself resolves it: the
  * generation input order, trimmed to the views Tripo accepts, then run through assignMultiviewViews. Reading the
  * assignment anywhere else (canvas labels, the angle menu) has to go through here, or the labels drift from what
@@ -224,7 +244,7 @@ export function resolveMultiviewAssignment(nodeId: string, nodes: CanvasNodeData
     if (images.length < 2) return [];
     const usable = images.slice(0, MULTIVIEW_VIEWS.length);
     const referenceImages = usable.map((input) => input.image!);
-    const views = assignMultiviewViews(referenceImages, nodes);
+    const views = assignMultiviewViews(referenceImages, nodesWithSocketViews(nodes, connections, nodeId));
     return usable.map((input, index) => ({ nodeId: input.nodeId, view: views[index] }));
 }
 

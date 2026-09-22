@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { TRIPO_MODELS } from "./model3d";
-import { requestTripoImageEdit, requestTripoImageGeneration, supportsTripoBackground, TRIPO_IMAGE_MODELS } from "./tripo-image";
+import { requestTripoImageEdit, requestTripoImageGeneration, resolveTripoImageTemplate, supportsTripoBackground, TRIPO_IMAGE_MODELS } from "./tripo-image";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -762,6 +762,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
+        const template = resolveTripoImageTemplate(config.imageTemplate);
         try {
             const result = await runModelPlugin({
                 capability: "image",
@@ -769,7 +770,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 images: [],
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}), ...(template ? { template } : {}) },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -779,7 +780,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
     if (requestConfig.apiFormat === "tripo") {
         try {
-            return await requestTripoImageGeneration(requestConfig, withSystemPrompt(requestConfig, prompt), n, { quality: config.quality, size: config.size, background: config.background }, options);
+            return await requestTripoImageGeneration(requestConfig, withSystemPrompt(requestConfig, prompt), n, { quality: config.quality, size: config.size, background: config.background, template: config.imageTemplate }, options);
         } catch (error) {
             throw imageError(error, apiText("requestFailed"));
         }
@@ -842,6 +843,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
+        const template = resolveTripoImageTemplate(config.imageTemplate);
         const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
         try {
             const result = await runModelPlugin({
@@ -850,7 +852,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 images: refs,
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}), ...(template ? { template } : {}) },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -860,7 +862,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     if (requestConfig.apiFormat === "tripo") {
         try {
-            return await requestTripoImageEdit(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, { quality: config.quality, size: config.size, background: config.background }, options);
+            return await requestTripoImageEdit(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, { quality: config.quality, size: config.size, background: config.background, template: config.imageTemplate }, options);
         } catch (error) {
             throw imageError(error, apiText("requestFailed"));
         }
