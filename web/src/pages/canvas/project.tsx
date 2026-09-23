@@ -29,6 +29,7 @@ import {
     resolveOpInput,
     storeModel3dOpResult,
 } from "@/services/api/model3d-ops";
+import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
 import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/components/canvas/canvas-model3d-ops";
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
@@ -2401,6 +2402,26 @@ function InfiniteCanvasPage() {
         [message, t],
     );
 
+    const importNodesToBlender = useCallback(
+        async (targets: CanvasNodeData[]) => {
+            const models = collectBlenderImportNodes(targets, nodesRef.current);
+            if (!models.length) {
+                message.warning(t("canvas.blenderBridge.none"));
+                return;
+            }
+            const hide = message.loading(t("canvas.blenderBridge.importing", { count: models.length }), 0);
+            try {
+                await importModelsToBlender(models);
+                message.success(t("canvas.blenderBridge.imported", { count: models.length }));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t("canvas.blenderBridge.importFailed", { name: models[0]?.title || "", reason: "" }));
+            } finally {
+                hide();
+            }
+        },
+        [message, t],
+    );
+
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {
         const image = node.metadata?.images?.find((item) => item.id === imageId);
         if (!image?.content) return;
@@ -4206,6 +4227,7 @@ function InfiniteCanvasPage() {
                     onBuiltinMultiview={(node) => void runMultiviewImageOp(node, undefined, "builtin")}
                     onModel3dOp={(node, op) => setModel3dOpTarget({ nodeId: node.id, op })}
                     onDownloadConvertedModel3d={(node) => void downloadConvertedModel3d(node)}
+                    onImportToBlender={(node) => void importNodesToBlender([node])}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}
@@ -4229,8 +4251,10 @@ function InfiniteCanvasPage() {
                         showToolbar={!isNodeDragging && !isNodeResizing}
                         canGroup={canGroupSelection}
                         canUngroup={canUngroupSelection}
+                        canImportToBlender={collectBlenderImportNodes(selectedNodes, nodes).length > 0}
                         onGroup={groupSelection}
                         onUngroup={ungroupSelection}
+                        onImportToBlender={() => void importNodesToBlender(selectedNodes)}
                     />
                 ) : null}
 
@@ -4269,6 +4293,7 @@ function InfiniteCanvasPage() {
                         canCaptureVideoFrame={contextMenuNode?.type === CanvasNodeType.Video && Boolean(contextMenuNode.metadata?.content)}
                         canGroup={contextMenu.type === "node" && canGroupSelection}
                         canUngroup={contextMenu.type === "node" && canUngroupSelection}
+                        canImportToBlender={contextMenu.type === "node" && collectBlenderImportNodes(selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [], nodes).length > 0}
                         onClose={() => setContextMenu(null)}
                         onCaptureVideoFrame={(position) => {
                             if (contextMenu.type !== "node") return;
@@ -4281,6 +4306,12 @@ function InfiniteCanvasPage() {
                         }}
                         onGroup={groupSelection}
                         onUngroup={ungroupSelection}
+                        onImportToBlender={() => {
+                            if (contextMenu.type !== "node") return;
+                            const targets = selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [];
+                            setContextMenu(null);
+                            void importNodesToBlender(targets);
+                        }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {
                                 deleteNodes(new Set([contextMenu.nodeId]));
