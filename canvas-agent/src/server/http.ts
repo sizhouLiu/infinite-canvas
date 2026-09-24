@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -141,6 +142,33 @@ export function startHttpServer() {
         const ok = session.resolveResult(String(req.query.clientId || ""), req.body);
         res.status(ok ? 200 : 409).json({ ok });
     });
+    /** Bambu Studio fetches this URL itself; keep the bytes only long enough for that download. */
+    const SHARE_TTL_MS = 10 * 60 * 1000;
+    const SHARE_MAX_BYTES = 20 * 1024 * 1024;
+    const sharedFiles = new Map<string, { mimeType: string; fileName: string; data: Buffer; expiresAt: number }>();
+    const pruneSharedFiles = () => {
+        const now = Date.now();
+        for (const [id, file] of sharedFiles) if (file.expiresAt <= now) sharedFiles.delete(id);
+    };
+    app.post("/share/file", route(async (req, res) => {
+        pruneSharedFiles();
+        const mimeType = String(req.body?.mimeType || "application/octet-stream");
+        const fileName = String(req.body?.fileName || "model.3mf").replace(/[\\/]/g, "_").slice(0, 80);
+        const data = Buffer.from(String(req.body?.data || ""), "base64");
+        if (!data.byteLength) return res.status(400).json({ ok: false, error: "file is empty" });
+        if (data.byteLength > SHARE_MAX_BYTES) return res.status(413).json({ ok: false, error: "file is too large" });
+        const id = crypto.randomBytes(18).toString("hex");
+        sharedFiles.set(id, { mimeType, fileName, data, expiresAt: Date.now() + SHARE_TTL_MS });
+        res.json({ ok: true, id });
+    }));
+    app.get("/share/file/:id", route(async (req, res) => {
+        pruneSharedFiles();
+        const file = sharedFiles.get(routeParam(req.params.id));
+        if (!file) return void res.status(404).json({ ok: false, error: "file not found" });
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Disposition", `attachment; filename="${file.fileName.replace(/"/g, "")}"`);
+        res.type(file.mimeType).send(file.data);
+    }));
     app.get("/agent/attachments/:attachmentId", route(async (req, res) => {
         const attachment = session.getTurnAttachment(String(req.query.clientId || ""), routeParam(req.params.attachmentId));
         const data = attachment.dataUrl.split(",", 2)[1];
@@ -524,7 +552,7 @@ function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfi
     res.setHeader("Access-Control-Allow-Headers", "content-type,x-canvas-agent-token");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Private-Network", "true");
-    if (!origin || req.method === "OPTIONS" || url.pathname === "/health" || url.pathname === "/config") return true;
+    if (!origin || req.method === "OPTIONS" || url.pathname === "/health" || url.pathname === "/config" || url.pathname.startsWith("/share/file/")) return true;
     config.origins ||= [];
     if (validToken(req, url, config.token) && !config.origins.includes(origin)) {
         config.origins.push(origin);

@@ -105,6 +105,8 @@ export type CanvasNodeMetadata = {
     model3dConvertedKey?: string;
     model3dConvertedFormat?: string;
     model3dConvertedMime?: string;
+    // Signed Tripo URL for the conversion output; Bambu Studio can fetch it while it is still valid.
+    model3dConvertedUrl?: string;
     model3dConvertTaskId?: string;
     // Which multiview angle an image node holds, and the task that produced the set.
     multiviewView?: MultiviewView;

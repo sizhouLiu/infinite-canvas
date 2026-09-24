@@ -34,7 +34,7 @@ export function buildCanvasToolRequest(name: ToolName, input: Record<string, unk
         return applyOps([configNodeOp(configId, input, x, y), ...(input.autoRun ? [runGenerationOp(configId, mode, prompt)] : [])]);
     }
     if (name === "canvas_create_generation_flow") return applyOps(generationFlowOps(input, state));
-    if (name === "canvas_generate_text" || name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_generate_audio") {
+    if (name === "canvas_generate_text" || name === "canvas_generate_image" || name === "canvas_generate_video" || name === "canvas_generate_audio" || name === "canvas_generate_model3d") {
         return applyOps(generationFlowOps({ ...input, mode: name.replace("canvas_generate_", ""), autoRun: true }, state));
     }
     if (name === "canvas_update_node") {
@@ -116,6 +116,11 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             audioFormat: input.audioFormat,
             audioSpeed: input.audioSpeed,
             audioInstructions: input.audioInstructions,
+            model3dTexture: input.model3dTexture,
+            model3dPbr: input.model3dPbr,
+            model3dTextureQuality: input.model3dTextureQuality,
+            model3dFaceLimit: input.model3dFaceLimit,
+            model3dQuad: input.model3dQuad,
         }),
     };
 }

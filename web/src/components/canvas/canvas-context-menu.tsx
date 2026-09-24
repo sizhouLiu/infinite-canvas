@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { BetweenHorizontalStart, Box, GalleryHorizontalEnd, GalleryHorizontal, Group, Plus, Trash2, Ungroup } from "lucide-react";
+import { BetweenHorizontalStart, Box, GalleryHorizontalEnd, GalleryHorizontal, Group, Plus, Printer, Trash2, Ungroup } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -8,7 +8,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import type { ContextMenuState } from "@/types/canvas";
 import type { VideoFramePosition } from "@/lib/canvas/canvas-video-frame";
 
-export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, canGroup, canUngroup, canImportToBlender, onClose, onCaptureVideoFrame, onDuplicate, onGroup, onUngroup, onImportToBlender, onDelete }: { menu: ContextMenuState; canCaptureVideoFrame: boolean; canGroup?: boolean; canUngroup?: boolean; canImportToBlender?: boolean; onClose: () => void; onCaptureVideoFrame: (position: VideoFramePosition) => void; onDuplicate: () => void; onGroup?: () => void; onUngroup?: () => void; onImportToBlender?: () => void; onDelete: () => void }) {
+export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, canGroup, canUngroup, canImportToBlender, canOpenInBambuStudio, onClose, onCaptureVideoFrame, onDuplicate, onGroup, onUngroup, onImportToBlender, onOpenInBambuStudio, onDelete }: { menu: ContextMenuState; canCaptureVideoFrame: boolean; canGroup?: boolean; canUngroup?: boolean; canImportToBlender?: boolean; canOpenInBambuStudio?: boolean; onClose: () => void; onCaptureVideoFrame: (position: VideoFramePosition) => void; onDuplicate: () => void; onGroup?: () => void; onUngroup?: () => void; onImportToBlender?: () => void; onOpenInBambuStudio?: () => void; onDelete: () => void }) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
@@ -39,6 +39,7 @@ export function CanvasNodeContextMenu({ menu, canCaptureVideoFrame, canGroup, ca
             {menu.type === "node" && canGroup ? <MenuButton icon={<Group className="size-4" />} label={t("canvas.nodeToolbar.group")} onClick={onGroup} /> : null}
             {menu.type === "node" && canUngroup ? <MenuButton icon={<Ungroup className="size-4" />} label={t("canvas.nodeToolbar.ungroup")} onClick={onUngroup} /> : null}
             {menu.type === "node" && canImportToBlender ? <MenuButton icon={<Box className="size-4" />} label={t("canvas.blenderBridge.label")} onClick={onImportToBlender} /> : null}
+            {menu.type === "node" && canOpenInBambuStudio ? <MenuButton icon={<Printer className="size-4" />} label={t("canvas.bambuStudio.label")} onClick={onOpenInBambuStudio} /> : null}
             {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label={t("canvas.controls.duplicate")} onClick={onDuplicate} /> : null}
             <MenuButton icon={<Trash2 className="size-4" />} label={t("canvas.controls.delete")} onClick={onDelete} danger />
         </div>

@@ -5,8 +5,6 @@
 <h1 align="center">无限画布 (infinite-canvas)</h1>
 
 <p align="center">
-  <a href="https://linux.do/"><img src="https://img.shields.io/badge/Linux.do-Community-2b6de8?style=flat-square" alt="Linux.do"></a>
-  <a href="https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/badge/Render-Deploy-46e3b7?style=flat-square&logo=render&logoColor=111111" alt="Deploy to Render"></a>
   <a href="https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/github/stars/basketikun/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
   <a href="https://github.com/basketikun/infinite-canvas/tags"><img src="https://img.shields.io/github/v/tag/basketikun/infinite-canvas?style=flat-square&label=version" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f97316?style=flat-square" alt="License"></a>
@@ -15,79 +13,24 @@
 </p>
 
 <p align="center">
-<a href="https://trendshift.io/repositories/50077?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-50077" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/50077" alt="basketikun%2Finfinite-canvas | Trendshift" width="250" height="55"/></a>
-</p>
-
-<p align="center">
   <a href="docs/content/docs/overview/quick-start.mdx">快速开始</a> · <a href="docs/content/docs/overview/features.mdx">功能介绍</a> · <a href="docs/content/docs/overview/render.mdx">Render 部署</a> · <a href="docs/content/docs/overview/docker.mdx">Docker 部署</a> · <a href="docs/content/docs/canvas/canvas-node-manual.mdx">画布节点操作手册</a> · <a href="docs/content/docs/canvas/canvas-shortcuts.mdx">画布快捷键</a> · <a href="SECURITY.md">漏洞提交</a> · <a href="docs/content/docs/progress/todo.mdx">待办事项</a> · <a href="canvas-agent/README.md">本地 Canvas Agent</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
 </p>
 
-无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
+无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、3D 生成、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代生成结果。
 
 > [!CAUTION]
 > 项目目前处于开发阶段，不保证历史数据兼容。各种本地存储格式都可能直接调整，欢迎关注后续更新。
 >
 > 如果你需要稳定维护自己的分支，建议自行 fork 后独立开发。二次开发与 PR 请保留原作者信息和前端页面标识。
 
-## 赞助商
-
-<table>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=infinite-canvas" target="_blank" rel="noopener noreferrer"><img src="assets/atlascloud.svg" width="163" alt="Atlas Cloud"></a>
-    </td>
-    <td>
-      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=infinite-canvas" target="_blank" rel="noopener noreferrer">Atlas Cloud</a> is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities. Check out <a href="https://www.atlascloud.ai/console/coding-plan" target="_blank" rel="noopener noreferrer">Atlas Cloud's new coding plan promotion</a> for more budget-friendly API access.
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://metaso.cn/minimax-h3/?s=inf" target="_blank" rel="noopener noreferrer"><img src="assets/metaso.jpg" width="163" alt="秘塔科技"></a>
-    </td>
-    <td>
-      <strong>MiniMax H3 视频生成 API｜秘塔科技</strong> 秘塔科技提供高性价比的 MiniMax H3 视频生成服务：<strong>768P 仅 0.09 元/秒，2K 仅 0.15 元/秒</strong>。支持原生 2K、音画同步，API 兼容 <strong>OpenAI 协议</strong>，同时支持 <strong>ComfyUI</strong>，无需自行部署 GPU。 🎁 通过 <a href="https://metaso.cn/minimax-h3/?s=inf" target="_blank" rel="noopener noreferrer">无限画布专属链接注册</a>，即可领取赠送额度及专属优惠。
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://www.infistar.cc/register?aff=4X3V9NA9&ref_source=link" target="_blank" rel="noopener noreferrer"><img src="assets/infistar.png" width="163" alt="Infistar.ai 无限星河"></a>
-    </td>
-    <td>
-      <strong>无限画布 × Infistar.ai 无限星河｜内置原生画布 · 全能多模态 API</strong> 💡 原生集成，即点即用： Infistar.ai 已原生上架无限画布！同时提供低至官方 1 折的稳定 API 中转服务，模型倍率与调用明细全程透明。 🎨 多模态生图/生视频： 完美适配 Seedance、FLUX、Midjourney、Sora、Runway、Luma、可灵（Kling）等顶级图片与视频大模型。 🧠 全系语言模型： 覆盖 OpenAI、Claude、Gemini、Grok、DeepSeek、Qwen、GLM 等国内外主流模型，兼容 OpenAI 标准接口。 ⚡ 动态调度： 多路供应保障高可用，拒绝断连。 🎁 专属福利： 通过 <a href="https://infistar.ai/register?aff=4X3V9NA9&ref_source=link" target="_blank" rel="noopener noreferrer">专属链接</a> 注册，立享赠送额度/专属折扣/首充权益！
-    </td>
-  </tr>
- <tr>
-    <td width="190" align="center">
-      <a href="https://heyroute.ai/basketikun" target="_blank" rel="noopener noreferrer"><img src="assets/heyroute.svg" width="163" alt="HeyRoute"></a>
-    </td>
-    <td>
-      <strong>无限画布 × HeyRoute｜全能多模态 API 服务商</strong>
-      💡&nbsp;HeyRoute 深度接入无限画布，将创意构思、图片生成、视频制作与内容开发融为一体，让每个灵感都能快速落地。
-      🎨&nbsp;多模态创作能力： 支持 AI 生图、生视频、图像编辑及内容生成，兼容 Seedance、MiniMax-H3、Image-2、Grok Video、Flux Klein、Gemini 等主流模型。
-      🧠&nbsp;丰富模型生态： 覆盖 OpenAI、Claude、Gemini、Grok、DeepSeek、Qwen、GLM 等语言模型，并兼容 OpenAI 标准接口。
-      ⚡&nbsp;稳定高效调用： 支持多模型、多线路灵活调度，调用记录清晰透明，满足日常创作、应用开发与批量生产需求。
-      🎁&nbsp;专属福利： 通过 <a href="https://heyroute.ai/basketikun">专属链接</a> 注册，即可领取新用户 15 美元试用额度！
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://www.packyapi.com/register?aff=34VV" target="_blank" rel="noopener noreferrer"><img src="assets/packycode.png" width="163" alt="PackyCode"></a>
-    </td>
-    <td>
-      <strong>无限画布 × PackyCode｜稳定高效的 API 中转服务商</strong>
-      💡&nbsp;PackyCode 是一家稳定、高效的 API 中转服务商，提供 Claude Code、Codex、Gemini 等多种中转服务，让 AI 编程成为真正的生产力工具。
-      ⚡&nbsp;稳定高效： 具备自动故障转移、智能路由和无限并发等多种功能，保障调用稳定可靠。
-      🎁&nbsp;专属福利： 通过 <a href="https://www.packyapi.com/register?aff=34VV" target="_blank" rel="noopener noreferrer">专属链接</a> 注册，立即开始使用！
-    </td>
-  </tr>
-</table>
-
 ## 核心功能
 
 - 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
 - AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成。
+- 3D 生成：接入 Tripo，支持文生 3D、图生 3D、多视图生 3D，节点内可拖拽旋转查看模型，并提供一整套 3D 后处理操作。
+- 本机 3D 软件联动：已生成的模型可直接导入本机 Blender，或唤起 Bambu Studio 打开 3MF。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
-- 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布；
+- 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
 - Codex App 插件：提供 Codex app 插件，安装后会自动注册 MCP 并尝试拉起本地 Agent。
 - 插件系统：支持通过 URL 动态安装 / 启用 / 更新 / 卸载远程节点插件，并提供 TypeScript SDK 自行开发画布节点插件。
 - 自定义接口调用：可自定义生图 / 视频接口的调用方式，灵活适配各类中转站与自建服务。
@@ -95,7 +38,42 @@
 
 完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
 
-如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
+## 3D 与 Tripo
+
+3D 能力由 Tripo 提供，配置和使用要点如下，完整说明见 [画布节点操作手册](docs/content/docs/canvas/canvas-node-manual.mdx)。
+
+### 配置
+
+- 在配置弹窗新增渠道，`apiFormat` 选择 **Tripo**，并填入该区域的 API Key。
+- Tripo 分国内版（`openapi.tripo3d.com`）和海外版（`openapi.tripo3d.ai`）两个独立区域，选择 Tripo 后渠道编辑器会出现区域切换；两个区域是独立账号，需各自填写 Key。
+- 必须开启 **本地代理**：Tripo 的 `/v3` 接口不返回 CORS 头，浏览器无法直连。
+- Tripo 渠道同时提供 3D 与图片生成能力，图片模型是它自己的一套（`seedream`、`banana`、`chat_image` 三个系列）。
+
+### 生成
+
+- 工具栏和连线创建菜单都可以新建 3D 节点，节点内使用可拖拽旋转、滚轮缩放的查看器展示 glb。
+- 空 3D 节点输入提示词走文生 3D；连接 1 个图片节点走图生 3D；连接 2–4 个图片节点走多视图生 3D，节点左侧的四个视角接点（正面 / 左侧 / 背面 / 右侧）用来指定每张图的视角。
+- 3D 设置包含贴图、PBR 材质、贴图质量和面数上限；面数上限留空为自动。
+- Tripo 生成是异步任务：任务 ID 写入节点，刷新页面会自动继续查询。生成成功后 glb 和预览图会立即下载到浏览器本地存储，因为 Tripo 的签名地址一天后失效。
+
+### 3D 操作
+
+悬停已有模型的 3D 节点打开「3D 操作」：重新贴图、自动绑骨、套用动画、减面、分割部件、网格补全和转换格式。除转换写回原节点外，其余操作都会在右侧生成新的 3D 节点并连线。
+
+- 自动绑骨会先跑 Tripo 免费的可绑骨检测，模型不可绑骨时直接提示，不消耗 credits。
+- 套用动画只能接在本画布绑过骨的节点后面，网格补全只能接在本画布分割过的节点后面。
+- 转换格式支持 FBX、GLTF、USDZ、OBJ、STL、3MF；产物留在原节点上，可从菜单下载。
+
+### 导入本机软件
+
+- **导入 Blender**：经 Tripo Bridge 插件的 `ws://127.0.0.1:60600` 把已存文件发给本机 Blender。需要用 `http://localhost` 打开画布，HTTPS 页面不允许连接本机 ws；3MF 不会发给 Blender。
+- **打开 Bambu Studio**：用 `bambustudio://open?file=` 唤起本机 Bambu Studio 打开 3MF。需要先把模型转成 3MF；转换时记下的 Tripo 地址仍有效就直接用它，否则由本机 Canvas Agent 临时托管该文件。
+
+多选或选中含 3D 的组可以一起操作。这两项都是画布 UI 操作，MCP 没有对应工具。
+
+### Agent 生成 3D
+
+Canvas Agent 把 3D 注册为一等生成工具 `canvas_generate_model3d`：仅有提示词走文生 3D，带上已有图片节点 ID 则走图生 3D 或多视图生 3D。
 
 ## 快速开始
 
@@ -121,7 +99,7 @@ docker compose up -d
 
 运行后默认端口3000，可访问 `http://localhost:3000`。
 
-首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
+首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`；需要 3D 时按上面的说明添加 Tripo 渠道。
 
 如果默认的OpenAI接口调用方式与您的API不同，可自定义生图/视频脚本调用。
 
@@ -146,34 +124,8 @@ docker compose up -d
   </tr>
 </table>
 
-## 联系方式
+## 原项目与开源协议
 
-项目定制二次开发需求 / 生图 API 需求可联系。
-
-邮箱：1844025705@qq.com · QQ：1844025705
-
-## 赞助支持
-
-本项目长期开放广告赞助合作，欢迎品牌 / 产品投放，你的支持是持续更新的动力！
-
-有广告赞助意向请通过上方联系方式沟通。
-
-## 社区支持
-
-学 AI，上 L 站：[LinuxDO](https://linux.do/)
-
-点击链接加入群聊【开源无限画布(2群)】：https://qm.qq.com/q/HRt2kUnYiG
-
-## 开源协议
+本项目源自 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)。
 
 本项目使用 [MIT License](LICENSE)。任何人都可以免费使用、复制、修改、分发、再授权和商业使用本项目，也可以用于闭源产品。
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=basketikun%2Finfinite-canvas&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=basketikun/infinite-canvas&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=basketikun/infinite-canvas&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=basketikun/infinite-canvas&type=date&legend=top-left" />
- </picture>
-</a>

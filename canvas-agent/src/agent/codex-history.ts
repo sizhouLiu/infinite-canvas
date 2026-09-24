@@ -719,6 +719,7 @@ function toolName(name: string) {
     if (name === "canvas_generate_image") return "生成图片";
     if (name === "canvas_generate_video") return "生成视频";
     if (name === "canvas_generate_audio") return "生成音频";
+    if (name === "canvas_generate_model3d") return "生成 3D";
     if (name === "canvas_update_node") return "更新节点";
     if (name === "canvas_update_node_text") return "更新文本";
     if (name === "canvas_move_nodes") return "移动节点";

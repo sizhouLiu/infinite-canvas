@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Box, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
+import { Box, Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, Printer, RefreshCw, Settings2, Trash2, Ungroup, Upload, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -46,6 +46,7 @@ type CanvasNodeHoverToolbarProps = {
     onModel3dOp?: (node: CanvasNodeData, op: Model3dOpId) => void;
     onDownloadConvertedModel3d?: (node: CanvasNodeData) => void;
     onImportToBlender?: (node: CanvasNodeData) => void;
+    onOpenInBambuStudio?: (node: CanvasNodeData) => void;
     extraTools?: CanvasNodeToolbarItem[];
 };
 
@@ -90,6 +91,7 @@ export function CanvasNodeHoverToolbar({
     onModel3dOp,
     onDownloadConvertedModel3d,
     onImportToBlender,
+    onOpenInBambuStudio,
     extraTools = [],
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -163,6 +165,7 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: t("common.addToAssets"), label: t("canvas.nodeToolbar.saveAsset"), icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio || hasModel3d ? [{ id: "download", title: t(hasModel3d ? "canvas.nodeToolbar.downloadModel3d" : hasAudio ? "canvas.nodeToolbar.downloadAudio" : hasVideo ? "canvas.nodeToolbar.downloadVideo" : "canvas.nodeToolbar.downloadImage"), label: t("common.download"), icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(hasModel3d && onImportToBlender ? [{ id: "blender", title: t("canvas.blenderBridge.title"), label: t("canvas.blenderBridge.label"), icon: <Box className="size-4" />, onClick: () => onImportToBlender(node) }] : []),
+        ...(hasModel3d && onOpenInBambuStudio ? [{ id: "bambu", title: t("canvas.bambuStudio.title"), label: t("canvas.bambuStudio.label"), icon: <Printer className="size-4" />, onClick: () => onOpenInBambuStudio(node) }] : []),
         ...(isVideo ? [{ id: "edit", title: t("common.edit"), label: t("common.edit"), icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: t("canvas.node.generateImage"), label: t("canvas.node.generate"), icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isConfig ? [{ id: "config", title: t("canvas.configNode.title"), label: t("canvas.configNode.title"), icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),

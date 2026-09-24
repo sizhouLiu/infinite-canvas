@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [新增] Codex / Canvas Agent 将 3D 注册为一等生成工具 `canvas_generate_model3d`，skill 与 Agent 说明书会按文生 3D / 图生 3D / 多视图生 3D 调用；读取画布摘要单独统计 3D 节点。
++ [新增] 画布可将选中的 3D 模型用 `bambustudio://open?file=` 唤起本机 Bambu Studio：悬停工具栏、右键菜单和多选工具栏提供「打开 Bambu Studio」。优先使用节点上仍有效的 3MF 转换地址；本地 3MF 经 Canvas Agent 临时托管后让 Studio 自行下载。需先转成 3MF；未安装 Studio 或未连接 Agent 时会给出可读提示。
 + [新增] Tripo 生图支持选择模板（T-pose / 角色补全 / 3D 增强 / 设计变体 / 全身人物）；选中后提示词变为可选，请求会带上 `template`。
 + [修复] Tripo 多张参考图改为只传 `inputs`，单张仍传 `input`；不再把第一张同时塞进两个字段，`input` 也不接受数组。
 + [新增] 3D 节点左侧四个视角接点（正面 / 左侧 / 背面 / 右侧）：单张图接到对应接点即指定视角，接点已被占用时与原图互换；打组后在组内成员上标记视角。未指定的仍按连线顺序补上剩下的视图。

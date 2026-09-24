@@ -30,6 +30,7 @@ import {
     storeModel3dOpResult,
 } from "@/services/api/model3d-ops";
 import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
+import { collectBambuImportNodes, openModelsInBambuStudio } from "@/services/api/bambu-studio";
 import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/components/canvas/canvas-model3d-ops";
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
@@ -212,6 +213,8 @@ function InfiniteCanvasPage() {
     const [searchParams] = useSearchParams();
     const projectId = params.id || "";
     const localAgentConnected = useAgentStore((state) => state.connected);
+    const localAgentUrl = useAgentStore((state) => state.url);
+    const localAgentToken = useAgentStore((state) => state.token);
     const localAgentActivity = useAgentStore((state) => state.activity);
     const localAgentEnabled = useAgentStore((state) => state.enabled);
     const fragmentBootstrap = useAgentStore((state) => state.fragmentBootstrap);
@@ -674,7 +677,7 @@ function InfiniteCanvasPage() {
                 const result = await waitForModel3dOp(generationConfig, taskId, { signal: controller.signal });
                 const stored = await storeModel3dOpResult(result.modelUrl, "model3d-converted");
                 resolveHistoryByTaskId(taskId, { status: "success", storageKey: stored.storageKey, mimeType: stored.mimeType });
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedMime: stored.mimeType } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedMime: stored.mimeType, model3dConvertedUrl: result.modelUrl } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 resolveHistoryByTaskId(taskId, { status: "error", error: error instanceof Error ? error.message : t("canvas.projectPage.generationFailed") });
@@ -796,7 +799,7 @@ function InfiniteCanvasPage() {
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === targetId
-                                ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedFormat: String(params.format), model3dConvertedMime: stored.mimeType } }
+                                ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedFormat: String(params.format), model3dConvertedMime: stored.mimeType, model3dConvertedUrl: result.modelUrl } }
                                 : node,
                         ),
                     );
@@ -2420,6 +2423,26 @@ function InfiniteCanvasPage() {
             }
         },
         [message, t],
+    );
+
+    const openNodesInBambuStudio = useCallback(
+        async (targets: CanvasNodeData[]) => {
+            const models = collectBambuImportNodes(targets, nodesRef.current);
+            if (!models.length) {
+                message.warning(t("canvas.bambuStudio.none"));
+                return;
+            }
+            const hide = message.loading(t("canvas.bambuStudio.opening", { count: models.length }), 0);
+            try {
+                await openModelsInBambuStudio(models, { url: localAgentUrl, token: localAgentToken, connected: localAgentConnected });
+                message.success(t("canvas.bambuStudio.opened", { count: models.length }));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t("canvas.bambuStudio.openFailed"));
+            } finally {
+                hide();
+            }
+        },
+        [localAgentConnected, localAgentToken, localAgentUrl, message, t],
     );
 
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {
@@ -4228,6 +4251,7 @@ function InfiniteCanvasPage() {
                     onModel3dOp={(node, op) => setModel3dOpTarget({ nodeId: node.id, op })}
                     onDownloadConvertedModel3d={(node) => void downloadConvertedModel3d(node)}
                     onImportToBlender={(node) => void importNodesToBlender([node])}
+                    onOpenInBambuStudio={(node) => void openNodesInBambuStudio([node])}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}
@@ -4252,9 +4276,11 @@ function InfiniteCanvasPage() {
                         canGroup={canGroupSelection}
                         canUngroup={canUngroupSelection}
                         canImportToBlender={collectBlenderImportNodes(selectedNodes, nodes).length > 0}
+                        canOpenInBambuStudio={collectBambuImportNodes(selectedNodes, nodes).length > 0}
                         onGroup={groupSelection}
                         onUngroup={ungroupSelection}
                         onImportToBlender={() => void importNodesToBlender(selectedNodes)}
+                        onOpenInBambuStudio={() => void openNodesInBambuStudio(selectedNodes)}
                     />
                 ) : null}
 
@@ -4294,6 +4320,7 @@ function InfiniteCanvasPage() {
                         canGroup={contextMenu.type === "node" && canGroupSelection}
                         canUngroup={contextMenu.type === "node" && canUngroupSelection}
                         canImportToBlender={contextMenu.type === "node" && collectBlenderImportNodes(selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [], nodes).length > 0}
+                        canOpenInBambuStudio={contextMenu.type === "node" && collectBambuImportNodes(selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [], nodes).length > 0}
                         onClose={() => setContextMenu(null)}
                         onCaptureVideoFrame={(position) => {
                             if (contextMenu.type !== "node") return;
@@ -4311,6 +4338,12 @@ function InfiniteCanvasPage() {
                             const targets = selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [];
                             setContextMenu(null);
                             void importNodesToBlender(targets);
+                        }}
+                        onOpenInBambuStudio={() => {
+                            if (contextMenu.type !== "node") return;
+                            const targets = selectedNodeIds.has(contextMenu.nodeId) && selectedNodeIds.size > 1 ? selectedNodes : contextMenuNode ? [contextMenuNode] : [];
+                            setContextMenu(null);
+                            void openNodesInBambuStudio(targets);
                         }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {

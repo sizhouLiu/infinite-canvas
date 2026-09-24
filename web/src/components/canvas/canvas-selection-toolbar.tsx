@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Box, Group, Ungroup } from "lucide-react";
+import { Box, Group, Printer, Ungroup } from "lucide-react";
 import { Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -17,9 +17,11 @@ export function CanvasSelectionToolbar({
     canGroup,
     canUngroup,
     canImportToBlender,
+    canOpenInBambuStudio,
     onGroup,
     onUngroup,
     onImportToBlender,
+    onOpenInBambuStudio,
 }: {
     nodes: CanvasNodeData[];
     viewport: ViewportTransform;
@@ -27,9 +29,11 @@ export function CanvasSelectionToolbar({
     canGroup: boolean;
     canUngroup: boolean;
     canImportToBlender?: boolean;
+    canOpenInBambuStudio?: boolean;
     onGroup: () => void;
     onUngroup: () => void;
     onImportToBlender?: () => void;
+    onOpenInBambuStudio?: () => void;
 }) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -40,7 +44,7 @@ export function CanvasSelectionToolbar({
     const top = viewport.y + bounds.top * viewport.k - SELECTION_PAD;
     const width = (bounds.right - bounds.left) * viewport.k + SELECTION_PAD * 2;
     const height = (bounds.bottom - bounds.top) * viewport.k + SELECTION_PAD * 2;
-    const showActions = showToolbar && (canGroup || canUngroup || canImportToBlender);
+    const showActions = showToolbar && (canGroup || canUngroup || canImportToBlender || canOpenInBambuStudio);
 
     return (
         <>
@@ -70,6 +74,7 @@ export function CanvasSelectionToolbar({
                     {canGroup ? <SelectionAction title={t("canvas.nodeToolbar.groupTitle")} label={t("canvas.nodeToolbar.group")} icon={<Group className="size-4" />} onClick={onGroup} /> : null}
                     {canUngroup ? <SelectionAction title={t("canvas.nodeToolbar.ungroupTitle")} label={t("canvas.nodeToolbar.ungroup")} icon={<Ungroup className="size-4" />} onClick={onUngroup} /> : null}
                     {canImportToBlender && onImportToBlender ? <SelectionAction title={t("canvas.blenderBridge.title")} label={t("canvas.blenderBridge.label")} icon={<Box className="size-4" />} onClick={onImportToBlender} /> : null}
+                    {canOpenInBambuStudio && onOpenInBambuStudio ? <SelectionAction title={t("canvas.bambuStudio.title")} label={t("canvas.bambuStudio.label")} icon={<Printer className="size-4" />} onClick={onOpenInBambuStudio} /> : null}
                 </div>
             ) : null}
         </>

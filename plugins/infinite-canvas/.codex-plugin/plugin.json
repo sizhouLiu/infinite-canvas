@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Infinite Canvas",
     "shortDescription": "Use Codex to operate the current Infinite Canvas board.",
-    "longDescription": "Connects Codex to the local Canvas Agent MCP server so Codex can inspect the current Infinite Canvas board, create nodes, connect flows, and trigger generation through the web canvas confirmation flow.",
+    "longDescription": "Connects Codex to the local Canvas Agent MCP server so Codex can inspect the current Infinite Canvas board, create nodes, connect flows, and trigger image, video, audio, or 3D generation through the web canvas confirmation flow.",
     "developerName": "basketikun",
     "category": "Productivity",
     "capabilities": ["Canvas", "MCP", "Creative Workflow"],

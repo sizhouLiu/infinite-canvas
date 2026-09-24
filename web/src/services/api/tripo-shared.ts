@@ -103,6 +103,7 @@ export function model3dMimeFromUrl(url: string, fallback = "model/gltf-binary") 
     if (/\.fbx$/i.test(path)) return "model/fbx";
     if (/\.glb$/i.test(path)) return "model/gltf-binary";
     if (/\.gltf$/i.test(path)) return "model/gltf+json";
+    if (/\.3mf$/i.test(path)) return "model/3mf";
     return fallback;
 }
 
