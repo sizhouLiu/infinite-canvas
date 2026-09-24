@@ -107,6 +107,7 @@ import {
     imageExtension,
     isAudioFile,
     isGenerationCanceled,
+    model3dExtension,
     resetInterruptedGeneration,
     resolveMetadataReferences,
     sourceNodeReferenceImages,
@@ -2387,7 +2388,7 @@ function InfiniteCanvasPage() {
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Model3d) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : node.type === CanvasNodeType.Model3d ? "glb" : imageExtension(node.metadata.content)}`);
+        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : node.type === CanvasNodeType.Model3d ? model3dExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
     /** The converted artifact lives only in local storage, so its blob URL is resolved on demand. */
@@ -2425,6 +2426,71 @@ function InfiniteCanvasPage() {
         [message, t],
     );
 
+    /**
+     * Bambu Studio only opens 3MF. A node that already has one is used as-is; anything else is converted
+     * through the same Tripo convert path as "3D ops", written back onto the node, then opened.
+     */
+    const ensureModel3dThreeMf = useCallback(
+        async (node: CanvasNodeData) => {
+            if (/3mf/i.test(node.metadata?.model3dConvertedFormat || "") || /3mf/i.test(node.metadata?.model3dConvertedMime || "") || /3mf/i.test(node.metadata?.mimeType || "")) return node;
+            if (generationRequestsRef.current.has(node.id)) throw new Error(t("canvas.bambuStudio.busy", { name: node.title?.trim() || node.id }));
+            const generationConfig = nodeGenerationConfig(node, "model3d");
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                throw new Error(t("canvas.bambuStudio.configRequired"));
+            }
+            const controller = startGenerationRequest(node.id, node.id, node.id);
+            const history = trackGeneration({ nodeId: node.id, kind: "model3dOp", title: model3dOpLabel("convert"), model: generationConfig.model, op: "convert" });
+            const previousFormat = node.metadata?.model3dConvertedFormat;
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, model3dConvertedFormat: "3MF" } } : item)));
+            try {
+                const source = { taskId: node.metadata?.model3dSourceTaskId, storageKey: node.metadata?.storageKey, mimeType: node.metadata?.mimeType };
+                const input = await resolveOpInput(generationConfig, source, { signal: controller.signal });
+                const result = await requestModel3dConvert(
+                    generationConfig,
+                    input,
+                    { format: "3MF" },
+                    {
+                        signal: controller.signal,
+                        onTaskCreated: (taskId) => {
+                            history.task(taskId);
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, model3dConvertTaskId: taskId } } : item)));
+                        },
+                    },
+                );
+                const stored = await storeModel3dOpResult(result.modelUrl, "model3d-converted");
+                const metadata = { ...node.metadata, status: NODE_STATUS_SUCCESS, model3dConvertTaskId: undefined, model3dConvertedKey: stored.storageKey, model3dConvertedFormat: "3MF", model3dConvertedMime: stored.mimeType, model3dConvertedUrl: result.modelUrl };
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...metadata } } : item)));
+                history.done({ storageKey: stored.storageKey, mimeType: stored.mimeType });
+                return { ...node, metadata };
+            } catch (error) {
+                history.fail(error);
+                if (!isGenerationCanceled(error)) {
+                    const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                    setNodes((prev) =>
+                        prev.map((item) =>
+                            item.id === node.id
+                                ? {
+                                      ...item,
+                                      metadata: {
+                                          ...item.metadata,
+                                          status: item.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
+                                          errorDetails: item.metadata?.content ? undefined : errorDetails,
+                                          ...(isModel3dTaskFailed(error) ? { model3dConvertTaskId: undefined, model3dConvertedFormat: previousFormat } : {}),
+                                      },
+                                  }
+                                : item,
+                        ),
+                    );
+                }
+                throw error;
+            } finally {
+                finishGenerationRequest(node.id, controller);
+            }
+        },
+        [finishGenerationRequest, isAiConfigReady, nodeGenerationConfig, openConfigDialog, startGenerationRequest, t, trackGeneration],
+    );
+
     const openNodesInBambuStudio = useCallback(
         async (targets: CanvasNodeData[]) => {
             const models = collectBambuImportNodes(targets, nodesRef.current);
@@ -2432,17 +2498,27 @@ function InfiniteCanvasPage() {
                 message.warning(t("canvas.bambuStudio.none"));
                 return;
             }
-            const hide = message.loading(t("canvas.bambuStudio.opening", { count: models.length }), 0);
+            const needsConvert = models.some((node) => !(/3mf/i.test(node.metadata?.model3dConvertedFormat || "") || /3mf/i.test(node.metadata?.model3dConvertedMime || "") || /3mf/i.test(node.metadata?.mimeType || "")));
+            const hide = message.loading(t(needsConvert ? "canvas.bambuStudio.converting" : "canvas.bambuStudio.opening", { count: models.length }), 0);
             try {
-                await openModelsInBambuStudio(models, { url: localAgentUrl, token: localAgentToken, connected: localAgentConnected });
-                message.success(t("canvas.bambuStudio.opened", { count: models.length }));
+                const ready: CanvasNodeData[] = [];
+                for (const node of models) ready.push(await ensureModel3dThreeMf(nodesRef.current.find((item) => item.id === node.id) || node));
+                hide();
+                const opening = message.loading(t("canvas.bambuStudio.opening", { count: ready.length }), 0);
+                try {
+                    await openModelsInBambuStudio(ready, { url: localAgentUrl, token: localAgentToken, connected: localAgentConnected });
+                    message.success(t("canvas.bambuStudio.opened", { count: ready.length }));
+                } finally {
+                    opening();
+                }
             } catch (error) {
+                if (isGenerationCanceled(error)) return;
                 message.error(error instanceof Error ? error.message : t("canvas.bambuStudio.openFailed"));
             } finally {
                 hide();
             }
         },
-        [localAgentConnected, localAgentToken, localAgentUrl, message, t],
+        [ensureModel3dThreeMf, localAgentConnected, localAgentToken, localAgentUrl, message, t],
     );
 
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {

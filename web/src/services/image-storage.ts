@@ -130,12 +130,14 @@ function throwIfAborted(signal?: AbortSignal) {
     if (signal?.aborted) throw abortReason(signal);
 }
 
+/** Same reasoning as the media store: a persisted blob: URL is already dead, so it is not worth handing back. */
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
-    if (!storageKey) return fallback;
+    const live = fallback.startsWith("blob:") ? "" : fallback;
+    if (!storageKey) return live;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
+    if (!blob) return live;
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;

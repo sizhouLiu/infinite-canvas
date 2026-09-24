@@ -18,12 +18,22 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
 }
 
+/**
+ * A blob: URL lives only as long as the page that created it, so one read back from a saved project is always
+ * dead. Handing it to an <img> or a loader can only fail with ERR_FILE_NOT_FOUND, while handing back nothing lets
+ * the caller treat the media as missing and rebuild what it can — a 3D node with a lost still renders once more
+ * and saves a fresh one. A URL still live in this page session is found in the cache above and never gets here.
+ */
+export function liveMediaFallback(fallback: string) {
+    return fallback.startsWith("blob:") ? "" : fallback;
+}
+
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
-    if (!storageKey) return fallback;
+    if (!storageKey) return liveMediaFallback(fallback);
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
+    if (!blob) return liveMediaFallback(fallback);
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;

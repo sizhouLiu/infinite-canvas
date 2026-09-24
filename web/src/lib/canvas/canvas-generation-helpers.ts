@@ -1,7 +1,7 @@
 import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import i18n from "@/i18n";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { resolveMediaUrl } from "@/services/file-storage";
+import { liveMediaFallback, resolveMediaUrl } from "@/services/file-storage";
 import { MULTIVIEW_VIEWS, type MultiviewView } from "@/services/api/model3d-ops";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
 import { buildNodeGenerationInputs, flattenGenerationInputs, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
@@ -21,6 +21,21 @@ export function audioExtension(mimeType?: string) {
     if (mimeType?.includes("flac")) return "flac";
     if (mimeType?.includes("pcm")) return "pcm";
     return "mp3";
+}
+
+/**
+ * A 3D node's own file is not always a glb: rig and retarget can emit FBX, so the extension follows the
+ * stored mime rather than the generation default. Conversion artifacts are named from their format instead,
+ * since they live on a separate key.
+ */
+export function model3dExtension(mimeType?: string) {
+    if (mimeType?.includes("fbx")) return "fbx";
+    if (mimeType?.includes("gltf+json")) return "gltf";
+    if (mimeType?.includes("3mf")) return "3mf";
+    if (mimeType?.includes("obj")) return "obj";
+    if (mimeType?.includes("stl")) return "stl";
+    if (mimeType?.includes("usd")) return "usdz";
+    return "glb";
 }
 
 export function generationReferenceUrls(context: { referenceImages: ReferenceImage[]; referenceVideos: Array<{ storageKey?: string; url?: string }>; referenceAudios?: Array<{ storageKey?: string; url?: string }> }) {
@@ -50,13 +65,18 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
             const content = metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
             // Tripo's signed URLs expire, so the 3D node reads both the model and its preview back from local storage.
-            if (node.type === CanvasNodeType.Model3d && metadata?.storageKey) {
+            // Both are cleared when storage cannot produce them, rather than left holding the blob: URL the last
+            // session handed out: that URL is dead on arrival, and an empty preview is what makes the node render
+            // once and save a new still instead of showing a broken image.
+            if (node.type === CanvasNodeType.Model3d && metadata) {
+                const preview = metadata.model3dPreviewKey ? await resolveMediaUrl(metadata.model3dPreviewKey, metadata.model3dPreview) : liveMediaFallback(metadata.model3dPreview || "");
                 return {
                     ...node,
                     metadata: {
                         ...metadata,
-                        content: await resolveMediaUrl(metadata.storageKey, content),
-                        ...(metadata.model3dPreviewKey ? { model3dPreview: await resolveMediaUrl(metadata.model3dPreviewKey, metadata.model3dPreview) } : {}),
+                        content: metadata.storageKey ? await resolveMediaUrl(metadata.storageKey, content) : liveMediaFallback(content || ""),
+                        model3dPreview: preview,
+                        ...(preview ? {} : { model3dPreviewKey: undefined }),
                     },
                 };
             }

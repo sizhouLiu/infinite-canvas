@@ -67,7 +67,7 @@
 ### 导入本机软件
 
 - **导入 Blender**：经 Tripo Bridge 插件的 `ws://127.0.0.1:60600` 把已存文件发给本机 Blender。需要用 `http://localhost` 打开画布，HTTPS 页面不允许连接本机 ws；3MF 不会发给 Blender。
-- **打开 Bambu Studio**：用 `bambustudio://open?file=` 唤起本机 Bambu Studio 打开 3MF。需要先把模型转成 3MF；转换时记下的 Tripo 地址仍有效就直接用它，否则由本机 Canvas Agent 临时托管该文件。
+- **打开 Bambu Studio**：用 `bambustudio://open?file=` 唤起本机 Bambu Studio 打开 3MF。节点还不是 3MF 时会自动转换并写回（消耗 credits）；转换时记下的 Tripo 地址仍有效就直接用它，否则由本机 Canvas Agent 临时托管该文件。
 
 多选或选中含 3D 的组可以一起操作。这两项都是画布 UI 操作，MCP 没有对应工具。
 

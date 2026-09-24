@@ -168,7 +168,12 @@ export function getConnectionEndpoint(node: CanvasNodeData, side: "source" | "ta
     };
 }
 
-export function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target", view?: MultiviewView) {
+/**
+ * Resolve a drag between two nodes into the connection it should create, or null when the pair cannot connect.
+ * The return is annotated rather than inferred: the branches below each build a differently shaped literal, and an
+ * inferred union leaves `kind` and `toHandle` absent from some members, so callers cannot destructure them.
+ */
+export function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNodeData[], firstHandleType: "source" | "target", view?: MultiviewView): Omit<CanvasConnection, "id"> | null {
     const first = nodes.find((node) => node.id === firstNodeId);
     const second = nodes.find((node) => node.id === secondNodeId);
     if (!first || !second || first.id === second.id) return null;
