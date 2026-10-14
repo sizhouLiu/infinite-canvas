@@ -7,6 +7,15 @@ RUN --mount=type=cache,target=/root/.bun/install/cache bun install --cache-dir=/
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY web ./
+
+# 构建导演台子应用并输出到 web/public/director-desk
+WORKDIR /app/director-desk
+COPY director-desk/package.json director-desk/package-lock.json ./
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --cache-dir=/root/.bun/install/cache
+COPY director-desk ./
+RUN bun run build
+
+WORKDIR /app/web
 RUN bun run build
 
 # 运行镜像：静态前端 + 同源转发代理。AI 请求仍由浏览器发出（Key 在用户本机），

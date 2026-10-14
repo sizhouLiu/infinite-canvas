@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Box, ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
+import { Box, Clapperboard, ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -23,7 +23,7 @@ export function ConnectionCreateMenu({
 }: {
     pending: PendingConnectionCreate;
     sourceNode?: CanvasNodeData;
-    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d) => void;
+    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d | CanvasNodeType.DirectorDesk) => void;
     onModel3dOp?: (op: Model3dOpId) => void;
     onClose: () => void;
 }) {
@@ -62,6 +62,7 @@ export function ConnectionCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title={t("canvas.createMenu.audio")} onClick={() => onCreate(CanvasNodeType.Audio)} />
                 <ConnectionCreateOption theme={theme} icon={<Box className="size-5" />} title={t("canvas.createMenu.model3d")} onClick={() => onCreate(CanvasNodeType.Model3d)} />
                 <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title={t("canvas.createMenu.config")} description={t("canvas.createMenu.configDescription")} onClick={() => onCreate(CanvasNodeType.Config)} />
+                {pending.connection.handleType === "source" && (sourceNode?.type === CanvasNodeType.Model3d || sourceNode?.type === CanvasNodeType.Image) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title={t("canvas.nodeTypes.directorDesk")} description={t("canvas.directorDesk.connectDescription")} onClick={() => onCreate(CanvasNodeType.DirectorDesk)} /> : null}
             </div>
         </div>
     );

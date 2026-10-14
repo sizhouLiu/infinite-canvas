@@ -36,6 +36,8 @@ const tasks = [
 // 23210 已有代理在跑（例如之前 npx 起的）就直接复用
 if (await inUse(23210)) console.log(`[proxy] ${proxyUrl} 已在监听，复用现有代理`);
 else tasks.push({ name: "proxy", color: 33, cmd: process.execPath, args: [join(root, "canvas-proxy/index.js"), "--host", "127.0.0.1", "--port", "23210"], cwd: root });
+if (await inUse(5174)) console.log(`[director-desk] 5174 已在监听，复用现有导演台`);
+else tasks.push({ name: "director-desk", color: 32, cmd: process.execPath, args: [join(root, "director-desk/node_modules/vite/bin/vite.js")], cwd: join(root, "director-desk") });
 if (withAgent) tasks.push({ name: "agent", color: 35, cmd: "npx", args: ["-y", "@basketikun/canvas-agent@latest"], cwd: root, shell: true });
 
 const children = [];

@@ -12,6 +12,7 @@ web/dist
 
 **/dist
 web/public/plugins
+web/public/director-desk
 plugins/canvas/*/dist
 plugins/canvas/*/node_modules
 web/public/plugins

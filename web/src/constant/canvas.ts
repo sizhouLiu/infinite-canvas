@@ -18,6 +18,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Audio]: { width: 340, height: 120, get title() { return i18n.t("canvas.nodeTypes.audio"); } },
     [CanvasNodeType.Model3d]: { width: 360, height: 360, get title() { return i18n.t("canvas.nodeTypes.model3d"); } },
     [CanvasNodeType.Group]: { width: 760, height: 480, get title() { return i18n.t("canvas.nodeTypes.group"); } },
+    [CanvasNodeType.DirectorDesk]: { width: 420, height: 280, get title() { return i18n.t("canvas.nodeTypes.directorDesk"); } },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {
@@ -48,6 +49,10 @@ export const NODE_SPECS = {
     [CanvasNodeType.Group]: {
         width: 760, height: 480, get title() { return NODE_DEFAULT_SIZE[CanvasNodeType.Group].title; },
         metadata: { status: "idle" },
+    },
+    [CanvasNodeType.DirectorDesk]: {
+        width: 420, height: 280, get title() { return NODE_DEFAULT_SIZE[CanvasNodeType.DirectorDesk].title; },
+        metadata: { content: "", status: "idle" },
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 
