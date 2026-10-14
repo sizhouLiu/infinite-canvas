@@ -252,8 +252,9 @@ export default {
         agentDisconnected: "Codex disconnected",
         connecting: "Connecting",
         openAgent: "Open local Codex panel",
-        nodeTypes: { image: "Image", text: "Text", config: "Generation config", video: "Video", audio: "Audio", model3d: "3D model", group: "Group" },
+        nodeTypes: { image: "Image", text: "Text", config: "Generation config", video: "Video", audio: "Audio", model3d: "3D model", group: "Group", directorDesk: "Director desk" },
         model3d: { loading: "Loading 3D model", loadFailed: "Could not load the 3D model", empty: "No 3D model yet", generating: "Generating 3D model", clip: "Animation", boneCount: "Bones: {{count}}", clipCount: "Animation: {{count}} clip(s)", rigged: "Rigged", staticMesh: "Static mesh", activate: "Click to load model", resetCamera: "Reset camera", play: "Play animation", pause: "Pause animation", captureView: "Export this view as an image", captureTitle: "{{name}} view", captured: "Image node created", captureFailed: "Could not export this view. Try again.", modes: { shaded: "Shaded", basecolor: "Base color", clay: "Clay", claywire: "Clay + wire", wireframe: "Wireframe", skeleton: "Skeleton" } },
+        directorDesk: { connectDescription: "Stage models in 3D, set up cameras, and capture shots", empty: "Double-click to open director desk", doubleClickToOpen: "Double-click to open" },
         toolbar: {
             select: "Select", pan: "Move", text: "Text", image: "Image", video: "Video", audio: "Audio", config: "Generation config", group: "Group", extensions: "Extension nodes", upload: "Upload assets", appearance: "Canvas appearance", clear: "Clear canvas",
             themeMode: "Theme", light: "Light", dark: "Dark", gridStyle: "Grid style", dots: "Dots", lines: "Lines", blank: "Blank", imageInfo: "Image info",

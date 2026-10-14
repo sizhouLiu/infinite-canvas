@@ -80,6 +80,7 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
                     },
                 };
             }
+            if (node.type === CanvasNodeType.DirectorDesk && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content) } };
             if (node.type !== CanvasNodeType.Image || !metadata || !content) return node;
             const images = await Promise.all((metadata.images || []).map(async (image) => (image.content ? { ...image, content: await resolveImageUrl(image.storageKey, image.content) } : image)));
             if (metadata.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content), images } };

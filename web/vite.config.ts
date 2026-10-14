@@ -41,6 +41,10 @@ function localPluginsManifest(): Plugin {
 export default defineConfig({
     base: process.env.VITE_BASE || "/",
     plugins: [react(), localPluginsManifest()],
+    // In dev the director desk runs its own Vite server (director-desk/, port 5174); proxy it so the iframe stays same-origin.
+    server: {
+        proxy: { "/director-desk": { target: "http://127.0.0.1:5174", ws: true } },
+    },
     resolve: {
         alias: {
             "@": resolve(webDir, "src"),

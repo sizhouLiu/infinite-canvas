@@ -68,6 +68,7 @@ import { InfiniteCanvas } from "@/components/canvas/infinite-canvas";
 import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasModel3dViewer } from "@/components/canvas/canvas-model3d-viewer";
+import { CanvasDirectorDeskOverlay } from "@/components/canvas/canvas-director-desk";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
@@ -310,6 +311,7 @@ function InfiniteCanvasPage() {
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [previewImageId, setPreviewImageId] = useState<string | null>(null);
     const [previewModel3dNodeId, setPreviewModel3dNodeId] = useState<string | null>(null);
+    const [previewDirectorDeskNodeId, setPreviewDirectorDeskNodeId] = useState<string | null>(null);
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
     const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -1207,7 +1209,7 @@ function InfiniteCanvasPage() {
     );
 
     const createConnectedNode = useCallback(
-        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d, pending: PendingConnectionCreate) => {
+        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d | CanvasNodeType.DirectorDesk, pending: PendingConnectionCreate) => {
             const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType, pending.connection.view);
@@ -1220,7 +1222,7 @@ function InfiniteCanvasPage() {
             applyViewFromConnection(connection.fromNodeId, connection.toNodeId, connection.toHandle);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
-            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
+            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.DirectorDesk) setDialogNodeId(newNode.id);
             setPendingConnectionCreate(null);
             setConnecting(null);
         },
@@ -1303,6 +1305,7 @@ function InfiniteCanvasPage() {
     const contextMenuNode = contextMenu?.type === "node" ? nodeById.get(contextMenu.nodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const previewModel3dNode = previewModel3dNodeId ? nodeById.get(previewModel3dNodeId) || null : null;
+    const previewDirectorDeskNode = previewDirectorDeskNodeId ? nodeById.get(previewDirectorDeskNodeId) || null : null;
     const previewContent = previewImageId ? previewNode?.metadata?.images?.find((image) => image.id === previewImageId)?.content : previewNode?.metadata?.content;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const selectedNodes = useMemo(() => nodes.filter((node) => selectedNodeIds.has(node.id)), [nodes, selectedNodeIds]);
@@ -1494,6 +1497,7 @@ function InfiniteCanvasPage() {
             setDecomposeNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewModel3dNodeId((current) => (current && allIds.has(current) ? null : current));
+            setPreviewDirectorDeskNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
             setExpandedBatchNodeIds((current) => new Set([...current].filter((nodeId) => !allIds.has(nodeId))));
@@ -1609,6 +1613,7 @@ function InfiniteCanvasPage() {
         setDecomposeNodeId(null);
         setPreviewNodeId(null);
         setPreviewModel3dNodeId(null);
+        setPreviewDirectorDeskNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
         setClearConfirmOpen(false);
@@ -4055,6 +4060,7 @@ function InfiniteCanvasPage() {
         setPreviewImageId(imageId || null);
     }, []);
     const handleNodeViewModel3d = useCallback((node: CanvasNodeData) => setPreviewModel3dNodeId(node.id), []);
+    const handleNodeViewDirectorDesk = useCallback((node: CanvasNodeData) => setPreviewDirectorDeskNodeId(node.id), []);
     const handleNodeRetry = useCallback(
         (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text && (node.metadata?.textCount || 1) > 1) {
@@ -4303,6 +4309,7 @@ function InfiniteCanvasPage() {
                             onRetry={handleNodeRetry}
                             onViewImage={handleNodeViewImage}
                             onViewModel3d={handleNodeViewModel3d}
+                            onViewDirectorDesk={handleNodeViewDirectorDesk}
                             onModel3dThumbnail={handleModel3dThumbnail}
                             onSelectReference={selectNodeReference}
                             onContextMenu={handleNodeContextMenu}
@@ -4564,6 +4571,24 @@ function InfiniteCanvasPage() {
                         </div>
                     ) : null}
                 </Modal>
+
+                {previewDirectorDeskNode ? (
+                    <CanvasDirectorDeskOverlay
+                        node={previewDirectorDeskNode}
+                        nodes={nodes}
+                        connections={connections}
+                        onClose={() => setPreviewDirectorDeskNodeId(null)}
+                        onCreateImageNode={(node) => {
+                            setNodes((prev) => [...prev, node]);
+                            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: previewDirectorDeskNode.id, toNodeId: node.id }]);
+                            setSelectedNodeIds(new Set([node.id]));
+                            setSelectedConnectionId(null);
+                        }}
+                        onUpdateNodeMetadata={(nodeId, patch) => {
+                            setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, ...patch } } : item)));
+                        }}
+                    />
+                ) : null}
 
                 <Modal
                     title={t("canvas.projectPage.clearTitle")}

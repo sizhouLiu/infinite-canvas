@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Box, ChevronRight, Copy, Download, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Trash2, Video } from "lucide-react";
 
 import { CanvasModel3dViewer } from "@/components/canvas/canvas-model3d-viewer";
+import { CanvasDirectorDeskNodeContent } from "@/components/canvas/canvas-director-desk";
 import { MODEL3D_LIVE_LIMIT, useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -58,6 +59,7 @@ type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData, imageId?: string) => void;
     onViewModel3d?: (node: CanvasNodeData) => void;
+    onViewDirectorDesk?: (node: CanvasNodeData) => void;
     /** Saves a still of a 3D node that has no preview image, so it can show one instead of rendering live. */
     onModel3dThumbnail?: (nodeId: string, blob: Blob) => void;
     onSelectReference?: (nodeId: string) => void;
@@ -128,6 +130,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onRetry,
     onViewImage,
     onViewModel3d,
+    onViewDirectorDesk,
     onModel3dThumbnail,
     onSelectReference,
     onContextMenu,
@@ -404,6 +407,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onViewModel3d?.(data);
                         return;
                     }
+                    if (data.type === CanvasNodeType.DirectorDesk) {
+                        event.stopPropagation();
+                        onViewDirectorDesk?.(data);
+                        return;
+                    }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
@@ -507,6 +515,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Model3d]: Model3dNodeContent,
     [CanvasNodeType.Group]: GroupNodeContent,
+    [CanvasNodeType.DirectorDesk]: DirectorDeskNodeContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererProps) {
@@ -565,6 +574,10 @@ function MissingPluginContent({ theme, type }: Pick<NodeContentRendererProps, "t
             <span className="text-[11px] opacity-70">{t("canvas.node.missingPluginDescription", { type })}</span>
         </div>
     );
+}
+
+function DirectorDeskNodeContent({ node }: NodeContentRendererProps) {
+    return <CanvasDirectorDeskNodeContent node={node} />;
 }
 
 function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, batchExpanded, onContentChange, onStopEditing, onToggleBatch, onSetBatchPrimary }: NodeContentRendererProps) {
