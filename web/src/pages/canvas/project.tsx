@@ -30,7 +30,7 @@ import {
 } from "@/services/api/model3d-ops";
 import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
 import { collectBambuImportNodes, openModelsInBambuStudio } from "@/services/api/bambu-studio";
-import { downloadFile } from "@/services/api/canvas-agent";
+import { saveAs } from "file-saver";
 import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/components/canvas/canvas-model3d-ops";
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
@@ -2413,7 +2413,7 @@ function InfiniteCanvasPage() {
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Model3d) || !node.metadata?.content) return;
-        void downloadFile(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : node.type === CanvasNodeType.Model3d ? model3dExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
+        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : node.type === CanvasNodeType.Model3d ? model3dExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
     /** The converted artifact lives only in local storage, so its blob URL is resolved on demand. */
@@ -2426,7 +2426,7 @@ function InfiniteCanvasPage() {
                 message.error(t("canvas.model3dOps.convertedMissing"));
                 return;
             }
-            await downloadFile(url, `canvas-model3d-${node.id}.${convertExtension(model3dConvertedFormat)}`);
+            saveAs(url, `canvas-model3d-${node.id}.${convertExtension(model3dConvertedFormat)}`);
         },
         [message, t],
     );
@@ -2549,7 +2549,7 @@ function InfiniteCanvasPage() {
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {
         const image = node.metadata?.images?.find((item) => item.id === imageId);
         if (!image?.content) return;
-        void downloadFile(image.content, `canvas-image-${node.id}-${image.id}.${imageExtension(image.content)}`);
+        saveAs(image.content, `canvas-image-${node.id}-${image.id}.${imageExtension(image.content)}`);
     }, []);
 
     const captureVideoNodeFrame = useCallback(
