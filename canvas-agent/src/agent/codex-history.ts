@@ -727,6 +727,7 @@ function toolName(name: string) {
     if (name === "canvas_delete_nodes") return "删除节点";
     if (name === "canvas_connect_nodes") return "连接节点";
     if (name === "canvas_select_nodes") return "选择节点";
+    if (name === "director_desk_command") return "操作导演台";
     if (name === "canvas_group_nodes") return "打组";
     if (name === "canvas_ungroup_nodes") return "取消打组";
     if (name === "canvas_set_viewport") return "调整视口";

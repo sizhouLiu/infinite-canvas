@@ -74,6 +74,7 @@ import { Minimap } from "@/components/canvas/canvas-mini-map";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { CanvasModel3dViewer } from "@/components/canvas/canvas-model3d-viewer";
 import { CanvasDirectorDeskOverlay } from "@/components/canvas/canvas-director-desk";
+import { setDirectorDeskOpener } from "@/lib/canvas/director-desk-bridge";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
@@ -4313,6 +4314,11 @@ function InfiniteCanvasPage() {
     }, []);
     const handleNodeViewModel3d = useCallback((node: CanvasNodeData) => setPreviewModel3dNodeId(node.id), []);
     const handleNodeViewDirectorDesk = useCallback((node: CanvasNodeData) => setPreviewDirectorDeskNodeId(node.id), []);
+    // Lets an Agent command open the desk overlay it targets; the overlay then registers itself as the receiver.
+    useEffect(() => {
+        setDirectorDeskOpener((nodeId) => setPreviewDirectorDeskNodeId(nodeId));
+        return () => setDirectorDeskOpener(null);
+    }, []);
     const handleNodeRetry = useCallback(
         (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text && (node.metadata?.textCount || 1) > 1) {

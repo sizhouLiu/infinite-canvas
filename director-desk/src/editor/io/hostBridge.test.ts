@@ -287,3 +287,33 @@ it("imports a connected canvas model once per source node", async () => {
   expect(hostAssets).toHaveLength(1);
   expect(hostAssets[0]).toMatchObject({ kind: "prop", fileName: "chair.glb", url: "blob:model-b" });
 });
+
+it("lists canvas assets sent by the host without adding them to the scene", async () => {
+  const { subscribeHostCanvasAssets } = await import("./hostBridge");
+  initDirectorDeskHostBridge();
+  await settle();
+  let received: unknown[] = [];
+  const unsubscribe = subscribeHostCanvasAssets((assets) => (received = assets));
+
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      data: {
+        type: "storyai:director-desk-assets",
+        payload: {
+          assets: [
+            { sourceNodeId: "node_model", kind: "model", url: "blob:model", fileName: "chair.glb", name: "chair" },
+            { sourceNodeId: "node_image", kind: "image", url: "blob:image", fileName: "sky.png", name: "sky" },
+            { sourceNodeId: "", kind: "model", url: "blob:bad" },
+          ],
+        },
+      },
+      origin: window.location.origin,
+    })
+  );
+  await settle();
+
+  expect(received).toHaveLength(2);
+  expect(received[0]).toMatchObject({ sourceNodeId: "node_model", kind: "model", url: "blob:model" });
+  expect(useDirectorStore.getState().project.assets.some((asset) => asset.hostSourceId === "node_model")).toBe(false);
+  unsubscribe();
+});

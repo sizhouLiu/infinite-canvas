@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { uploadImage } from "@/services/image-storage";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { registerDirectorDeskSender } from "@/lib/canvas/director-desk-bridge";
 import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
@@ -15,6 +16,25 @@ const CAPTURE_GAP = 96;
 
 // The desk picks its loader from the file extension, so canvas models need one even when the title has none.
 const MODEL_EXTENSIONS: Record<string, string> = { "model/gltf-binary": "glb", "model/gltf+json": "gltf", "model/fbx": "fbx", "model/obj": "obj" };
+
+function imageFileName(node: CanvasNodeData) {
+    const title = node.title || "image";
+    if (/\.(png|jpe?g|webp|gif)$/i.test(title)) return title;
+    return `${title}.png`;
+}
+
+type DirectorDeskCanvasAsset = { sourceNodeId: string; kind: "model" | "image"; url: string; fileName: string; name: string; thumbUrl?: string };
+
+/** Every 3D model and image on the canvas, offered in the desk's "画布" library tab whether or not it is connected. */
+function listCanvasAssets(nodes: CanvasNodeData[]): DirectorDeskCanvasAsset[] {
+    return nodes.flatMap((item): DirectorDeskCanvasAsset[] => {
+        const url = item.metadata?.content;
+        if (!url) return [];
+        if (item.type === CanvasNodeType.Model3d) return [{ sourceNodeId: item.id, kind: "model", url, fileName: modelFileName(item), name: item.title || item.id, thumbUrl: item.metadata?.model3dPreview }];
+        if (item.type === CanvasNodeType.Image) return [{ sourceNodeId: item.id, kind: "image", url, fileName: imageFileName(item), name: item.title || item.id, thumbUrl: url }];
+        return [];
+    });
+}
 
 function modelFileName(node: CanvasNodeData) {
     const title = node.title || "model";
@@ -62,23 +82,27 @@ export function CanvasDirectorDeskOverlay({
     const latest = useRef({ node, nodes, onClose, onCreateImageNode, onUpdateNodeMetadata });
     latest.current = { node, nodes, onClose, onCreateImageNode, onUpdateNodeMetadata };
 
-    const upstream = connections.filter((connection) => connection.toNodeId === node.id).map((connection) => nodes.find((item) => item.id === connection.fromNodeId));
-    const models = upstream.filter((item): item is CanvasNodeData => item?.type === CanvasNodeType.Model3d && Boolean(item.metadata?.content));
-    const panorama = upstream.find((item): item is CanvasNodeData => item?.type === CanvasNodeType.Image && Boolean(item.metadata?.content));
-    const upstreamKey = JSON.stringify([models.map((item) => [item.id, item.metadata?.content]), panorama?.metadata?.content]);
+    const connected = connections.filter((connection) => connection.toNodeId === node.id).map((connection) => nodes.find((item) => item.id === connection.fromNodeId));
+    const connectedModels = connected.filter((item): item is CanvasNodeData => item?.type === CanvasNodeType.Model3d && Boolean(item.metadata?.content));
+    const panorama = connected.find((item): item is CanvasNodeData => item?.type === CanvasNodeType.Image && Boolean(item.metadata?.content));
+    const libraryAssets = listCanvasAssets(nodes);
+    const connectedKey = JSON.stringify([connectedModels.map((item) => [item.id, item.metadata?.content]), panorama?.metadata?.content]);
+    const libraryKey = JSON.stringify(libraryAssets.map((item) => [item.sourceNodeId, item.url, item.thumbUrl]));
 
-    // Push connected models and the first connected image (as panorama). The desk dedupes models by source node id.
+    // Push every canvas 3D / image node into the desk's library. Connected models still drop into the scene;
+    // the first connected image still becomes the panorama, matching the previous behaviour.
     useEffect(() => {
         const target = iframeRef.current?.contentWindow;
         if (!ready || !target) return;
-        models.forEach((item) => {
+        target.postMessage({ type: "storyai:director-desk-assets", payload: { assets: libraryAssets } }, window.location.origin);
+        connectedModels.forEach((item) => {
             target.postMessage({ type: "storyai:director-desk-model", payload: { sourceNodeId: item.id, url: item.metadata?.content, fileName: modelFileName(item), name: item.title } }, window.location.origin);
         });
         if (panorama) {
             target.postMessage({ type: "storyai:director-desk-panorama", payload: { edgeId: `${panorama.id}->${node.id}`, sourceNodeId: panorama.id, imageUrl: panorama.metadata?.content, fileName: panorama.title } }, window.location.origin);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ready, upstreamKey]);
+    }, [ready, connectedKey, libraryKey]);
 
     useEffect(() => {
         const saveCaptures = async (captures: Array<{ dataUrl?: string; fileName?: string }>) => {
@@ -109,6 +133,34 @@ export function CanvasDirectorDeskOverlay({
         window.addEventListener("message", handleMessage);
         return () => window.removeEventListener("message", handleMessage);
     }, [t]);
+
+    // Once the desk is ready, Agent commands for this node go to its iframe and resolve on the matching reply.
+    useEffect(() => {
+        const target = iframeRef.current?.contentWindow;
+        if (!ready || !target) return;
+        const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+        const handleResult = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin || event.source !== target || event.data?.type !== "storyai:director-desk-command-result") return;
+            const entry = pending.get(event.data.requestId);
+            if (!entry) return;
+            pending.delete(event.data.requestId);
+            if (event.data.error) entry.reject(new Error(String(event.data.error)));
+            else entry.resolve(event.data.result);
+        };
+        window.addEventListener("message", handleResult);
+        const unregister = registerDirectorDeskSender(node.id, (command) => {
+            const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            return new Promise((resolve, reject) => {
+                pending.set(requestId, { resolve, reject });
+                target.postMessage({ type: "storyai:director-desk-command", requestId, payload: command }, window.location.origin);
+            });
+        });
+        return () => {
+            unregister();
+            window.removeEventListener("message", handleResult);
+            pending.forEach((entry) => entry.reject(new Error("导演台已关闭")));
+        };
+    }, [ready, node.id]);
 
     // The desk renders its own close button and posts storyai:director-desk-close.
     return createPortal(

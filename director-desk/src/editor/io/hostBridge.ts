@@ -19,6 +19,24 @@ interface HostSessionPayload {
   theme?: unknown;
 }
 
+interface HostCanvasAssetPayload {
+  sourceNodeId?: unknown;
+  kind?: unknown;
+  url?: unknown;
+  fileName?: unknown;
+  name?: unknown;
+  thumbUrl?: unknown;
+}
+
+export interface HostCanvasAsset {
+  sourceNodeId: string;
+  kind: "model" | "image";
+  url: string;
+  fileName: string;
+  name: string;
+  thumbUrl?: string;
+}
+
 export interface HostCaptureItemPayload {
   dataUrl?: unknown;
   fileName?: unknown;
@@ -38,6 +56,8 @@ let initialized = false;
 let hostConnectedPanorama: HostConnectedPanorama | null = null;
 let removeUnsubscribe: (() => void) | null = null;
 let suppressNextPanoramaRemovalNotice = false;
+let canvasAssets: HostCanvasAsset[] = [];
+const canvasAssetListeners = new Set<(assets: HostCanvasAsset[]) => void>();
 
 function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -122,6 +142,44 @@ function importHostPanorama(payload: HostPanoramaPayload) {
   });
 }
 
+function parseCanvasAssets(payload: { assets?: unknown }) {
+  if (!Array.isArray(payload.assets)) return [];
+  const assets: HostCanvasAsset[] = [];
+  for (const item of payload.assets) {
+    const sourceNodeId = normalizeString((item as HostCanvasAssetPayload)?.sourceNodeId);
+    const url = normalizeString((item as HostCanvasAssetPayload)?.url);
+    const kind = (item as HostCanvasAssetPayload)?.kind === "image" ? "image" : (item as HostCanvasAssetPayload)?.kind === "model" ? "model" : null;
+    if (!sourceNodeId || !url || !kind) continue;
+    const fileName = normalizeString((item as HostCanvasAssetPayload)?.fileName) || (kind === "image" ? "画布图片.png" : "画布模型.glb");
+    assets.push({
+      sourceNodeId,
+      kind,
+      url,
+      fileName,
+      name: normalizeString((item as HostCanvasAssetPayload)?.name) || fileName,
+      thumbUrl: normalizeString((item as HostCanvasAssetPayload)?.thumbUrl) || undefined,
+    });
+  }
+  return assets;
+}
+
+function setCanvasAssets(next: HostCanvasAsset[]) {
+  canvasAssets = next;
+  canvasAssetListeners.forEach((listener) => listener(next));
+}
+
+export function getHostCanvasAssets() {
+  return canvasAssets;
+}
+
+export function subscribeHostCanvasAssets(listener: (assets: HostCanvasAsset[]) => void) {
+  canvasAssetListeners.add(listener);
+  listener(canvasAssets);
+  return () => {
+    canvasAssetListeners.delete(listener);
+  };
+}
+
 function importHostModel(payload: HostModelPayload) {
   const url = normalizeString(payload.url);
   if (!url) return;
@@ -203,6 +261,28 @@ function handleHostMessage(event: MessageEvent) {
 
   if (event.data?.type === "storyai:director-desk-model") {
     hostMessageQueue = hostMessageQueue.then(() => importHostModel(payload as HostModelPayload));
+    return;
+  }
+
+  if (event.data?.type === "storyai:director-desk-command") {
+    const requestId = normalizeString(event.data?.requestId);
+    // Queued behind session loads and imports, so a command sent right after opening sees the restored scene.
+    hostMessageQueue = hostMessageQueue.then(async () => {
+      const reply = (body: { result?: unknown; error?: string }) => window.parent?.postMessage({ type: "storyai:director-desk-command-result", requestId, ...body }, getHostOrigin());
+      try {
+        const { runDirectorCommand } = await import("./agentCommands");
+        reply({ result: await runDirectorCommand(payload as Record<string, unknown>) });
+      } catch (error) {
+        reply({ error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+    return;
+  }
+
+  if (event.data?.type === "storyai:director-desk-assets") {
+    hostMessageQueue = hostMessageQueue.then(() => {
+      setCanvasAssets(parseCanvasAssets(payload as { assets?: unknown }));
+    });
   }
 }
 
@@ -228,6 +308,7 @@ export function clearDirectorDeskHostBridge() {
   initialized = false;
   hostMessageQueue = Promise.resolve();
   hostConnectedPanorama = null;
+  setCanvasAssets([]);
   suppressNextPanoramaRemovalNotice = false;
   window.removeEventListener("message", handleHostMessage);
   removeUnsubscribe?.();

@@ -1,4 +1,4 @@
-export type ModelLibraryCategoryId = "convenience" | "home" | "outdoor" | "tools" | "my-models";
+export type ModelLibraryCategoryId = "convenience" | "home" | "outdoor" | "tools" | "canvas" | "my-models";
 
 export type ModelLibraryCategory = {
   directoryName: string;
@@ -20,6 +20,7 @@ export const MODEL_LIBRARY_CATEGORIES: ModelLibraryCategory[] = [
   { id: "home", label: "居家生活", directoryName: "生活家居" },
   { id: "outdoor", label: "户外出行", directoryName: "户外出行" },
   { id: "tools", label: "工具配件", directoryName: "工具配件" },
+  { id: "canvas", label: "画布", directoryName: "" },
   { id: "my-models", label: "我的模型", directoryName: "" },
 ];
 

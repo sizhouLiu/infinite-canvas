@@ -30,6 +30,7 @@ const SITE_TOOLS = new Set<ToolName>([
     "canvas_list_projects",
     "canvas_download_nodes",
     "canvas_import_to_blender",
+    "director_desk_command",
     "workbench_image_get_config",
     "workbench_image_generate",
     "workbench_video_get_config",

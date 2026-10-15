@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { requestViewportCapture } from "../io/captureBridge";
+import { getHostCanvasAssets, subscribeHostCanvasAssets, type HostCanvasAsset } from "../io/hostBridge";
 import { readLocalModelFile } from "../loaders/localModelImport";
 import { readPanoramaFile } from "../loaders/panoramaImport";
 import {
@@ -119,8 +120,10 @@ export function ViewportToolbar({
   const [crowdSpacing, setCrowdSpacing] = useState(String(DEFAULT_CROWD_SPACING));
   const [activeModelLibraryCategoryId, setActiveModelLibraryCategoryId] =
     useState<ModelLibraryCategoryId>("convenience");
+  const [canvasAssets, setCanvasAssets] = useState<HostCanvasAsset[]>(() => getHostCanvasAssets());
   const addImportedAsset = useDirectorStore((state) => state.addImportedAsset);
   const addObjectFromAsset = useDirectorStore((state) => state.addObjectFromAsset);
+  const upsertHostModelAsset = useDirectorStore((state) => state.upsertHostModelAsset);
   const removeImportedAsset = useDirectorStore((state) => state.removeImportedAsset);
   const assets = useDirectorStore((state) => state.project.assets);
   const addPresetCharacter = useDirectorStore((state) => state.addPresetCharacter);
@@ -136,6 +139,8 @@ export function ViewportToolbar({
   const setTransformMode = useDirectorStore((state) => state.setTransformMode);
   const setViewportAspectRatio = useDirectorStore((state) => state.setViewportAspectRatio);
   const toggleViewportPanelsCollapsed = useDirectorStore((state) => state.toggleViewportPanelsCollapsed);
+
+  useEffect(() => subscribeHostCanvasAssets(setCanvasAssets), []);
 
   useEffect(() => {
     if (!characterMenuOpen && !crowdPanelOpen && !modelLibraryOpen && !aspectRatioPanelOpen) return;
@@ -392,6 +397,26 @@ export function ViewportToolbar({
     setAspectRatioPanelOpen(false);
   }
 
+  function addCanvasAsset(item: HostCanvasAsset) {
+    if (item.kind === "image") {
+      addImportedAsset({
+        kind: "panorama",
+        name: item.name,
+        fileName: item.fileName,
+        url: item.url,
+        projectionMode: "backdrop",
+      });
+    } else {
+      upsertHostModelAsset({
+        hostSourceId: item.sourceNodeId,
+        name: item.name,
+        fileName: item.fileName,
+        url: item.url,
+      });
+    }
+    setModelLibraryOpen(false);
+  }
+
   function addModelLibraryItem(item: ModelLibraryItem) {
     addImportedAsset({
       kind: "prop",
@@ -407,6 +432,15 @@ export function ViewportToolbar({
     libraryLocalModelInputRef.current?.click();
   }
 
+  const canvasLibraryItems: ModelLibraryItem[] = canvasAssets.map((item) => ({
+    categoryId: "canvas",
+    fileName: item.fileName,
+    id: item.sourceNodeId,
+    name: item.kind === "image" ? `${item.name}（全景）` : item.name,
+    thumbUrl: item.thumbUrl,
+    url: item.url,
+  }));
+  const canvasAssetById = new Map(canvasAssets.map((item) => [item.sourceNodeId, item]));
   const myModelLibraryItems: ModelLibraryItem[] = assets
     .filter((asset) => asset.sourceType === "model" && asset.assetSource === "local")
     .map(
@@ -483,7 +517,9 @@ export function ViewportToolbar({
   const activeModelLibraryItems =
     activeModelLibraryCategoryId === "my-models"
       ? myModelLibraryItems
-      : modelLibraryItems.filter((item) => item.categoryId === activeModelLibraryCategoryId);
+      : activeModelLibraryCategoryId === "canvas"
+        ? canvasLibraryItems
+        : modelLibraryItems.filter((item) => item.categoryId === activeModelLibraryCategoryId);
   const crowdInputValue = getCrowdInputValue();
   const crowdTotalCount = crowdInputValue.rows * crowdInputValue.columns;
 
@@ -741,6 +777,13 @@ export function ViewportToolbar({
                 本地导入
               </button>
             </div>
+          ) : activeModelLibraryCategoryId === "canvas" && activeModelLibraryItems.length === 0 ? (
+            <div className="model-library-empty-state object-search-empty-state" role="status" aria-label="画布上暂无模型和图片">
+              <span className="object-search-empty-icon">
+                <Boxes aria-hidden="true" size={16} strokeWidth={1.8} />
+              </span>
+              <span>画布上暂无模型和图片</span>
+            </div>
           ) : (
             <div className="model-library-grid" role="list" aria-label="模型列表">
               {activeModelLibraryItems.map((item) => (
@@ -788,6 +831,11 @@ export function ViewportToolbar({
                     className="model-library-card"
                     type="button"
                     onClick={() => {
+                      if (activeModelLibraryCategoryId === "canvas") {
+                        const asset = canvasAssetById.get(item.id);
+                        if (asset) addCanvasAsset(asset);
+                        return;
+                      }
                       addModelLibraryItem(item);
                     }}
                   >

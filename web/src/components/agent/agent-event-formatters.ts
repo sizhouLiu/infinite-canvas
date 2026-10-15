@@ -508,7 +508,7 @@ export function formatBytes(bytes: number) {
 }
 
 export function isCanvasWriteTool(name: string) {
-    return name === "canvas_apply_ops" || name === "canvas_create_attachment_nodes" || name === "canvas_download_nodes" || name === "canvas_import_to_blender";
+    return name === "canvas_apply_ops" || name === "canvas_create_attachment_nodes" || name === "canvas_download_nodes" || name === "canvas_import_to_blender" || name === "director_desk_command";
 }
 
 function parseToolArguments(value: unknown) {

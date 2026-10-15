@@ -6,6 +6,7 @@
 - 只有用户明确要求查看、选择或切换其他画布，或者 `canvas_get_state` 明确提示当前没有已连接画布时，才使用 `canvas_list_projects` 和 `site_navigate`。`site_navigate` 可跳转 `/`、`/canvas`、`/canvas/:id`、`/image`、`/video`、`/prompts`、`/assets`、`/config`。
 - 下载画布媒体使用 `canvas_download_nodes`，导入本机 Blender 使用 `canvas_import_to_blender`；传 `nodeIds` 指定节点，省略则使用当前选区。下载只代表浏览器已触发，不保证落盘或返回本地路径；Blender 返回的是已启动，不代表已完成，最终结果在网页提示及事件日志中显示。Blender 需开启 60600 WebSocket 桥接，不能用 9876 MCP 连接代替；不要因为工具已返回就重复导入。
 - 修改当前画布时根据任务使用已配置的 infinite-canvas MCP 工具；复杂批量改动使用 `canvas_apply_ops`。
+- 操作 3D 导演台（摆角色和道具、设姿势、加机位、截图）使用 `director_desk_command`，先用 `action: "get_scene"` 读取场景再修改；截图会作为图片节点回到画布，不要再手动创建图片节点。
 - 用户要求把上传附件放入画布或作为生成参考图时，必须先用 `canvas_create_attachment_nodes` 创建真实图片节点，再把节点 ID 传给生成流程，不要创建空图片占位节点。
 - 生图与视频工作台分别使用 `workbench_image_*`、`workbench_video_*` 工具；提示词和素材分别使用 `prompts_search`、`assets_*` 工具。
 - 用户要求生成图片、视频、音频、文本或 3D 时，默认调用对应的 `canvas_generate_image`、`canvas_generate_video`、`canvas_generate_audio`、`canvas_generate_text`、`canvas_generate_model3d`，通过当前画布的生成节点完成任务。仅有提示词走文生 3D；用户指向已有图片或选中图片时，把这些图片节点 ID 放入 `referenceNodeIds`（1 张图生 3D，2–4 张多视图生 3D）。不要为了 3D 去调生图工具。

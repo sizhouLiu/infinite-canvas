@@ -142,7 +142,7 @@ export interface DirectorActions {
   pasteClipboardObjects: () => void;
   undo: () => void;
   openScopedScene: (scopeId: string | null | undefined) => Promise<void>;
-  upsertHostModelAsset: (input: { hostSourceId: string; name: string; fileName: string; url: string }) => void;
+  upsertHostModelAsset: (input: { hostSourceId: string; name: string; fileName: string; url: string; addToScene?: boolean }) => void;
   replaceProject: (project: DirectorProject) => void;
   saveLatestSnapshot: () => void;
   restoreLatestSnapshot: () => void;
@@ -2048,6 +2048,15 @@ export const useDirectorStore = create<DirectorStore>((set, get) => {
           assetSource: "host",
           hostSourceId: input.hostSourceId,
         } satisfies DirectorAssetRef;
+        if (input.addToScene === false) {
+          return {
+            ...state,
+            project: {
+              ...state.project,
+              assets: [...state.project.assets, nextAsset],
+            },
+          };
+        }
         const nextObject = createSceneObjectFromAsset(nextAsset, state.project.objects);
 
         return {

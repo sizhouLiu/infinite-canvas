@@ -5,6 +5,7 @@ import i18n from "@/i18n";
 import { audioExtension, imageExtension, model3dExtension } from "@/lib/canvas/canvas-generation-helpers";
 import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
 import { CanvasNodeType } from "@/types/canvas";
+import { openDirectorDeskIds, sendDirectorDeskCommand } from "@/lib/canvas/director-desk-bridge";
 import { fetchPrompts } from "@/services/api/prompts";
 import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
@@ -23,6 +24,7 @@ export const SITE_TOOL_NAMES = [
     "canvas_list_projects",
     "canvas_download_nodes",
     "canvas_import_to_blender",
+    "director_desk_command",
     "generation_get_status",
     "workbench_image_get_config",
     "workbench_image_generate",
@@ -47,6 +49,7 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
     get canvas_list_projects() { return siteText("canvasList"); },
     get canvas_download_nodes() { return siteText("downloadNodes"); },
     get canvas_import_to_blender() { return siteText("importToBlender"); },
+    get director_desk_command() { return siteText("directorDesk"); },
     get generation_get_status() { return siteText("generationStatus"); },
     get workbench_image_get_config() { return siteText("imageConfig"); },
     get workbench_image_generate() { return siteText("imageGenerate"); },
@@ -70,6 +73,8 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
             return downloadCanvasNodes(input, context.canvasSnapshot);
         case "canvas_import_to_blender":
             return importCanvasNodesToBlender(input, context);
+        case "director_desk_command":
+            return runDirectorDeskCommand(input, context.canvasSnapshot);
         case "generation_get_status":
             return getGenerationStatus(input, context.canvasSnapshot);
         case "workbench_image_get_config":
@@ -118,6 +123,23 @@ function importCanvasNodesToBlender(input: SiteToolInput, context: SiteToolConte
     if (!context.onBlenderImport) throw new Error(siteText("unknownTool", { name: "canvas_import_to_blender" }));
     context.onBlenderImport(importModelsToBlender(models), models.length);
     return { ok: true, importing: true, count: models.length, titles: models.map((node) => node.title || node.id) };
+}
+
+/**
+ * Run one director desk command. nodeId picks the desk; without it an already open desk is used, or the only desk
+ * node on the canvas. The desk overlay opens on demand, so the Agent never has to double-click the node.
+ */
+async function runDirectorDeskCommand(input: SiteToolInput, snapshot?: CanvasAgentSnapshot | null) {
+    if (!snapshot) throw new Error(siteText("openCanvasFirst"));
+    const desks = snapshot.nodes.filter((node) => node.type === CanvasNodeType.DirectorDesk);
+    const requested = typeof input.nodeId === "string" ? input.nodeId : "";
+    const open = openDirectorDeskIds().find((id) => desks.some((node) => node.id === id));
+    const nodeId = requested || open || (desks.length === 1 ? desks[0].id : "");
+    if (!nodeId) throw new Error(desks.length ? siteText("directorDeskChoose", { ids: desks.map((node) => node.id).join(", ") }) : siteText("directorDeskMissing"));
+    if (!desks.some((node) => node.id === nodeId)) throw new Error(siteText("directorDeskNotFound", { id: nodeId }));
+    const { nodeId: _nodeId, ...command } = input;
+    if (typeof command.action !== "string") throw new Error(siteText("directorDeskAction"));
+    return { nodeId, result: await sendDirectorDeskCommand(nodeId, command as { action: string }) };
 }
 
 function nodeIds(input: SiteToolInput, snapshot: CanvasAgentSnapshot) {

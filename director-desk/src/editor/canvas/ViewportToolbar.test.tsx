@@ -384,6 +384,7 @@ it("opens the model library panel from the viewport capsule", async () => {
   expect(screen.getByRole("tab", { name: "居家生活" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "户外出行" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "工具配件" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "画布" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "我的模型" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "关闭模型库" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "添加模型 自动取款机" })).toBeInTheDocument();
