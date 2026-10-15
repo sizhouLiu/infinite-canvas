@@ -17,6 +17,7 @@ description: 操作 Infinite Canvas 当前网页画布，读取节点、选区�
 - 需要把提示词、配置和生成节点串成流程时，使用 `canvas_create_generation_flow`（`mode` 可为 text / image / video / audio / model3d）或项目已有的流程工具。
 - 创建空 3D 占位节点用 `canvas_create_node`，`nodeType` 为 `model3d`。已有模型可用 `canvas_import_to_blender` 导入 Blender；用 `canvas_download_nodes` 下载画布媒体。两个工具均可传 `nodeIds`，省略则使用当前选区；返回“已启动/已触发”不代表导入完成或文件已落盘。打开 Bambu Studio 仍是画布 UI 操作。
 - 需要批量增删改、移动、连接节点或设置视口时，使用 `canvas_apply_ops`。
+- 需要把多个节点归为一组时，使用 `canvas_group_nodes`（至少两个节点，可传 `title`）；解散用 `canvas_ungroup_nodes`，传组 ID 解散整组，传成员 ID 只移出该成员。
 - 不要模拟鼠标点击，不要要求用户手动复制 JSON。
 - 写入画布的操作会由网页侧边栏做二次确认，按当前工具结果继续推进即可。
 

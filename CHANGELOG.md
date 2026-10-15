@@ -2,6 +2,9 @@
 
 ## Unreleased
 
++ [新增] 拖动节点时显示对齐辅助线，并吸附到附近节点的边缘和中心；按住 Alt 可自由拖动。
++ [新增] Agent 新增 `canvas_group_nodes` / `canvas_ungroup_nodes` 工具，`canvas_apply_ops` 支持 `group_nodes` / `ungroup_nodes` 操作。
+
 + [新增] 画布新增「导演台」节点：集成 3D 导演台（storyai-3d-director-desk），双击全屏打开，连入的 3D 模型和图片会自动导入为道具和全景背景，机位截图「发送到画布」后生成图片节点。
 + [新增] 画布支持上传或拖入 GLB / FBX / OBJ 模型生成 3D 节点；OBJ 可与 MTL 和贴图一起选择，导入时转为 GLB。
 + [新增] 3D 操作新增「智能 UV」（Tripo `/mesh/uv`），可选择把原贴图烘焙到新 UV 布局。

@@ -62,6 +62,11 @@ export function buildCanvasToolRequest(name: ToolName, input: Record<string, unk
         return applyOps(data.connections.map((connection) => ({ type: "connect_nodes", ...connection })));
     }
     if (name === "canvas_select_nodes") return applyOps([{ type: "select_nodes", ids: (input as { ids: string[] }).ids }]);
+    if (name === "canvas_group_nodes") {
+        const data = input as { ids: string[]; title?: string };
+        return applyOps([{ type: "group_nodes", ids: data.ids, title: data.title }]);
+    }
+    if (name === "canvas_ungroup_nodes") return applyOps([{ type: "ungroup_nodes", ids: (input as { ids: string[] }).ids }]);
     if (name === "canvas_set_viewport") return applyOps([{ type: "set_viewport", viewport: (input as { viewport: unknown }).viewport }]);
     if (name === "canvas_run_generation") {
         const data = input as { nodeId: string; mode?: string; prompt?: string };

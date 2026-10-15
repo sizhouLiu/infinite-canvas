@@ -2,6 +2,8 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { getNodeSpec, isRegisteredNodeType } from "@/lib/canvas/node-registry";
+import { applyGroupSelection, applyUngroupSelection, collectGroupMemberNodes, getGroupWrapRect } from "@/lib/canvas/canvas-node-geometry";
+import { createCanvasNode } from "@/lib/canvas/canvas-node-factory";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type CanvasNodeTypeId, type ViewportTransform } from "@/types/canvas";
 
 export type CanvasAgentOp =
@@ -12,6 +14,8 @@ export type CanvasAgentOp =
     | { type: "connect_nodes"; id?: string; fromNodeId: string; toNodeId: string }
     | { type: "set_viewport"; viewport: ViewportTransform }
     | { type: "select_nodes"; ids: string[] }
+    | { type: "group_nodes"; ids: string[]; id?: string; title?: string }
+    | { type: "ungroup_nodes"; ids: string[] }
     | { type: "run_generation"; nodeId: string; mode?: "text" | "image" | "video" | "audio" | "model3d"; prompt?: string };
 
 export type CanvasAgentSnapshot = {
@@ -79,6 +83,22 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;
         if (op.type === "select_nodes") selectedNodeIds = (op.ids || []).filter((id) => nodes.some((node) => node.id === id));
+        // Same helpers as manual grouping, so an Agent group behaves exactly like one made from the toolbar.
+        if (op.type === "group_nodes") {
+            const ids = new Set((op.ids || []).filter((id) => nodes.some((node) => node.id === id)));
+            const members = collectGroupMemberNodes(ids, nodes);
+            if (members.length >= 2) {
+                const rect = getGroupWrapRect(members);
+                const created = createCanvasNode(CanvasNodeType.Group, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+                const group = { ...created, ...(op.id ? { id: op.id } : {}), ...(op.title ? { title: op.title } : {}), position: { x: rect.x, y: rect.y }, width: rect.width, height: rect.height };
+                const result = applyGroupSelection(ids, nodes, connections, group);
+                if (result) ({ nodes, connections, selectedIds: selectedNodeIds } = result);
+            }
+        }
+        if (op.type === "ungroup_nodes") {
+            const result = applyUngroupSelection(new Set(op.ids || []), nodes, connections);
+            if (result) ({ nodes, connections, selectedIds: selectedNodeIds } = result);
+        }
     });
 
     return { ...snapshot, nodes, connections, selectedNodeIds, viewport };

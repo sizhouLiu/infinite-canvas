@@ -35,6 +35,7 @@ import { saveAs } from "file-saver";
 import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/components/canvas/canvas-model3d-ops";
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
 import { CanvasModel3dTextureDialog, type Model3dTextureSelection } from "@/components/canvas/canvas-model3d-texture-dialog";
+import { draggedRect, snapMovingRect, type SnapGuide } from "@/lib/canvas/canvas-snap";
 import { MODEL3D_IMPORT_ACCEPT, prepareModel3dFile, splitModel3dFiles } from "@/lib/canvas/canvas-model3d-import";
 import { applyModel3dTextures, derivePbrMaps, extractModel3dBaseColors, fitTextureToSize, PBR_MAP_PROMPTS, PBR_MAP_ROLES, resolveTextureLineage, type MaterialMaps, type MaterialSlotMaps, type PbrMapRole } from "@/lib/canvas/canvas-model3d-textures";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
@@ -246,12 +247,15 @@ function InfiniteCanvasPage() {
         startX: number;
         startY: number;
         initialSelectedNodes: { id: string; x: number; y: number }[];
+        // Extra offset the last move snapped by; drag end reuses it so releasing keeps the aligned position.
+        snapOffset: { x: number; y: number };
     }>({
         isDraggingNode: false,
         hasMoved: false,
         startX: 0,
         startY: 0,
         initialSelectedNodes: [],
+        snapOffset: { x: 0, y: 0 },
     });
 
     const config = useConfigStore((state) => state.config);
@@ -324,6 +328,7 @@ function InfiniteCanvasPage() {
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [isNodeResizing, setIsNodeResizing] = useState(false);
     const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null);
+    const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
     const [referencePickerNodeId, setReferencePickerNodeId] = useState<string | null>(null);
     const [multiviewViewMenu, setMultiviewViewMenu] = useState<MultiviewViewMenuState | null>(null);
 
@@ -1924,6 +1929,7 @@ function InfiniteCanvasPage() {
             startX: event.clientX,
             startY: event.clientY,
             initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y })),
+            snapOffset: { x: 0, y: 0 },
         };
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
@@ -1940,8 +1946,8 @@ function InfiniteCanvasPage() {
         const wasClick = !dragRef.current.hasMoved && dragRef.current.initialSelectedNodes.length === 1;
         const clickedNodeId = dragRef.current.initialSelectedNodes[0]?.id;
         const currentViewport = viewportRef.current;
-        const dx = clientX == null ? 0 : (clientX - dragRef.current.startX) / currentViewport.k;
-        const dy = clientY == null ? 0 : (clientY - dragRef.current.startY) / currentViewport.k;
+        const dx = clientX == null ? 0 : (clientX - dragRef.current.startX) / currentViewport.k + dragRef.current.snapOffset.x;
+        const dy = clientY == null ? 0 : (clientY - dragRef.current.startY) / currentViewport.k + dragRef.current.snapOffset.y;
         const initialPositions = dragRef.current.initialSelectedNodes;
 
         historyPausedRef.current = false;
@@ -1967,6 +1973,7 @@ function InfiniteCanvasPage() {
         }
 
         dragRef.current.isDraggingNode = false;
+        setSnapGuides([]);
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
         if (wasClick && clickedNodeId) {
@@ -1986,9 +1993,26 @@ function InfiniteCanvasPage() {
             const currentViewport = viewportRef.current;
 
             if (dragRef.current.isDraggingNode) {
-                const dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
-                const dy = (event.clientY - dragRef.current.startY) / currentViewport.k;
+                let dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
+                let dy = (event.clientY - dragRef.current.startY) / currentViewport.k;
                 const initialPositions = dragRef.current.initialSelectedNodes;
+                // Snap the selection's bounds onto nearby nodes' edges and centers; holding Alt drags freely.
+                const draggedIds = new Set(initialPositions.map((item) => item.id));
+                const startNodes = nodesRef.current.map((node) => {
+                    const initial = initialPositions.find((item) => item.id === node.id);
+                    return initial ? { ...node, position: { x: initial.x, y: initial.y } } : node;
+                });
+                const moving = event.altKey ? null : draggedRect(startNodes, draggedIds, dx, dy);
+                if (moving) {
+                    const snap = snapMovingRect(moving, startNodes, draggedIds, currentViewport.k);
+                    dx += snap.offset.x;
+                    dy += snap.offset.y;
+                    dragRef.current.snapOffset = snap.offset;
+                    setSnapGuides(snap.guides);
+                } else {
+                    dragRef.current.snapOffset = { x: 0, y: 0 };
+                    setSnapGuides([]);
+                }
                 if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) {
                     dragRef.current.hasMoved = true;
                 }
@@ -4463,6 +4487,17 @@ function InfiniteCanvasPage() {
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
                 >
+                    {snapGuides.length ? (
+                        <svg className="pointer-events-none absolute left-0 top-0 z-[90] h-[10000px] w-[10000px] overflow-visible">
+                            {snapGuides.map((guide) =>
+                                guide.axis === "x" ? (
+                                    <line key={`x-${guide.at}`} x1={guide.at} x2={guide.at} y1={guide.from} y2={guide.to} stroke="#ff3b8d" strokeWidth={1 / viewport.k} strokeDasharray={`${4 / viewport.k} ${3 / viewport.k}`} />
+                                ) : (
+                                    <line key={`y-${guide.at}`} y1={guide.at} y2={guide.at} x1={guide.from} x2={guide.to} stroke="#ff3b8d" strokeWidth={1 / viewport.k} strokeDasharray={`${4 / viewport.k} ${3 / viewport.k}`} />
+                                ),
+                            )}
+                        </svg>
+                    ) : null}
                     <svg className="absolute left-0 top-0 h-[10000px] w-[10000px] overflow-visible" style={{ pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
                         {connections
                             .map((connection) => {
