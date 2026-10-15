@@ -16,6 +16,7 @@ import {
     requestModel3dComplete,
     requestModel3dConvert,
     requestModel3dDecimate,
+    requestModel3dUv,
     requestModel3dRetarget,
     requestModel3dRig,
     requestModel3dSegment,
@@ -33,6 +34,9 @@ import { collectBambuImportNodes, openModelsInBambuStudio } from "@/services/api
 import { saveAs } from "file-saver";
 import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/components/canvas/canvas-model3d-ops";
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
+import { CanvasModel3dTextureDialog, type Model3dTextureSelection } from "@/components/canvas/canvas-model3d-texture-dialog";
+import { MODEL3D_IMPORT_ACCEPT, prepareModel3dFile, splitModel3dFiles } from "@/lib/canvas/canvas-model3d-import";
+import { applyModel3dTextures, derivePbrMaps, extractModel3dBaseColors, fitTextureToSize, PBR_MAP_PROMPTS, PBR_MAP_ROLES, resolveTextureLineage, type MaterialMaps, type MaterialSlotMaps, type PbrMapRole } from "@/lib/canvas/canvas-model3d-textures";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -307,6 +311,7 @@ function InfiniteCanvasPage() {
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [decomposeNodeId, setDecomposeNodeId] = useState<string | null>(null);
     const [model3dOpTarget, setModel3dOpTarget] = useState<{ nodeId: string; op: Model3dOpId } | null>(null);
+    const [model3dTextureNodeId, setModel3dTextureNodeId] = useState<string | null>(null);
     const [multiviewEditNodeId, setMultiviewEditNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [previewImageId, setPreviewImageId] = useState<string | null>(null);
@@ -806,6 +811,7 @@ function InfiniteCanvasPage() {
                     else if (op === "convert") result = await requestModel3dConvert(generationConfig, input, { format: String(params.format), quad: Boolean(params.quad), faceLimit }, options);
                     else if (op === "rig") result = await requestModel3dRig(generationConfig, input, { model: String(params.model), rigType: String(params.rigType), spec: String(params.spec), outFormat: String(params.outFormat) }, options);
                     else if (op === "segment") result = await requestModel3dSegment(generationConfig, input, { model: String(params.model), granularity: String(params.granularity), splitByConnectivity: Boolean(params.splitByConnectivity) }, options);
+                    else if (op === "uv") result = await requestModel3dUv(generationConfig, input, { bake: Boolean(params.bake) }, options);
                     else result = await requestModel3dDecimate(generationConfig, input, { model: String(params.model), faceLimit, quad: Boolean(params.quad) }, options);
                 }
 
@@ -2156,6 +2162,45 @@ function InfiniteCanvasPage() {
         setSelectedConnectionId(null);
     }, []);
 
+    /** OBJ is converted to GLB with its MTL and textures first; GLB and FBX are stored as-is. */
+    const createModel3dFileNodes = useCallback(
+        async (files: File[], resources: File[], position: Position) => {
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Model3d];
+            const STAGGER = 40;
+            const ids: string[] = [];
+            for (const [index, file] of files.entries()) {
+                try {
+                    const { blob, missing } = await prepareModel3dFile(file, resources);
+                    if (missing.length) message.warning(t("canvas.model3dImport.missingTextures", { name: file.name, files: missing.join(", ") }));
+                    const stored = await uploadMediaFile(blob, "model3d");
+                    const id = `model3d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                    const offset = index * STAGGER;
+                    setNodes((prev) => [
+                        ...prev,
+                        {
+                            id,
+                            type: CanvasNodeType.Model3d,
+                            title: file.name,
+                            position: { x: position.x - spec.width / 2 + offset, y: position.y - spec.height / 2 + offset },
+                            width: spec.width,
+                            height: spec.height,
+                            // No model3dSourceTaskId: an imported file has no Tripo task, so follow-ups upload it.
+                            metadata: model3dMetadata(stored),
+                        },
+                    ]);
+                    ids.push(id);
+                } catch (error) {
+                    message.error(t("canvas.model3dImport.failed", { name: file.name, error: error instanceof Error ? error.message : String(error) }));
+                }
+            }
+            if (ids.length) {
+                setSelectedNodeIds(new Set(ids));
+                setSelectedConnectionId(null);
+            }
+        },
+        [message, t],
+    );
+
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
             const trimmed = text.trim();
@@ -2434,6 +2479,187 @@ function InfiniteCanvasPage() {
             saveAs(url, `canvas-model3d-${node.id}.${convertExtension(model3dConvertedFormat)}`);
         },
         [message, t],
+    );
+
+    /** Image nodes keep blob: URLs that die on reload, so the pixels are read back through image storage. */
+    const readImageNodeBlob = useCallback(async (node: CanvasNodeData) => {
+        const dataUrl = await imageToDataUrl({ url: node.metadata?.content, storageKey: node.metadata?.storageKey });
+        if (!dataUrl) throw new Error(t("canvas.model3dTextures.imageMissing"));
+        return (await fetch(dataUrl)).blob();
+    }, [t]);
+
+    /** Texture images go in a column to the right of their source, tagged so applying can preselect them. */
+    const placeTextureNodes = useCallback((sourceNode: CanvasNodeData, items: Array<{ image: UploadedImage; role: NonNullable<CanvasNodeData["metadata"]>["model3dTextureRole"]; textureSource?: string; slot?: number; title?: string }>) => {
+        const gap = 16;
+        let y = sourceNode.position.y;
+        const created = items.map(({ image, role, textureSource, slot, title }) => {
+            const size = fitNodeSize(image.width, image.height, 320, 320);
+            const node: CanvasNodeData = {
+                id: nanoid(),
+                type: CanvasNodeType.Image,
+                title: title || t(`canvas.model3dTextures.roles.${role}`),
+                position: { x: sourceNode.position.x + (sourceNode.width || 320) + 96, y },
+                width: size.width,
+                height: size.height,
+                metadata: { ...imageMetadata(image), model3dTextureRole: role, ...(textureSource ? { model3dTextureSource: textureSource } : {}), ...(slot === undefined ? {} : { model3dTextureSlot: slot }) },
+            };
+            y += size.height + gap;
+            return node;
+        });
+        setNodes((prev) => [...prev, ...created]);
+        setConnections((prev) => [...prev, ...created.map((node) => ({ id: nanoid(), fromNodeId: sourceNode.id, toNodeId: node.id }))]);
+    }, [t]);
+
+    const resolveModel3dUrl = useCallback(async (node: CanvasNodeData) => {
+        const url = await resolveMediaUrl(node.metadata?.storageKey, node.metadata?.content || "");
+        if (!url) throw new Error(t("canvas.model3dOps.convertedMissing"));
+        return url;
+    }, [t]);
+
+    const extractModel3dTexture = useCallback(
+        async (node: CanvasNodeData) => {
+            const hide = message.loading(t("canvas.model3dTextures.extracting"), 0);
+            try {
+                const textures = await extractModel3dBaseColors(await resolveModel3dUrl(node), node.metadata?.mimeType);
+                if (!textures.length) {
+                    message.warning(t("canvas.model3dTextures.noTexture"));
+                    return;
+                }
+                const base = t("canvas.model3dTextures.roles.baseColor");
+                // Titled after the material so several extracted textures stay tellable apart on the canvas.
+                const items = await Promise.all(
+                    textures.map(async (texture) => ({ image: await uploadImage(texture.blob), role: "baseColor" as const, textureSource: node.id, slot: texture.slot, title: `${base} · ${texture.label || t("canvas.model3dTextures.slotLabel", { index: texture.slot + 1 })}` })),
+                );
+                placeTextureNodes(node, items);
+                if (textures.length > 1) message.success(t("canvas.model3dTextures.extractedCount", { count: textures.length }));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t("canvas.projectPage.generationFailed"));
+            } finally {
+                hide();
+            }
+        },
+        [message, placeTextureNodes, resolveModel3dUrl, t],
+    );
+
+    /** Local derivation: free and pixel-aligned with the UVs, but an approximation from luminance. */
+    const derivePbrLocal = useCallback(
+        async (node: CanvasNodeData) => {
+            if (!node.metadata?.content) return;
+            const hide = message.loading(t("canvas.model3dTextures.deriving"), 0);
+            try {
+                const maps = await derivePbrMaps(await readImageNodeBlob(node));
+                const tag = resolveTextureLineage(nodesRef.current, connectionsRef.current).get(node.id);
+                const images = await Promise.all(PBR_MAP_ROLES.map(async (role) => ({ image: await uploadImage(maps[role]), role, textureSource: tag?.source, slot: tag?.slot })));
+                placeTextureNodes(node, images);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t("canvas.projectPage.generationFailed"));
+            } finally {
+                hide();
+            }
+        },
+        [message, placeTextureNodes, readImageNodeBlob, t],
+    );
+
+    /**
+     * AI derivation on the configured image model. Runs one map at a time like the built-in multiview, and scales
+     * each result back to the source size; the model may still shift content, which a local pass never does.
+     */
+    const derivePbrAi = useCallback(
+        async (sourceNode: CanvasNodeData) => {
+            if (!sourceNode.metadata?.content) return;
+            const generationConfig = nodeGenerationConfig(sourceNode, "image");
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                return;
+            }
+            const controller = startGenerationRequest(sourceNode.id, sourceNode.id, sourceNode.id);
+            const history = trackGeneration({ nodeId: sourceNode.id, kind: "image", title: t("canvas.imageTools.pbrAi"), model: generationConfig.model });
+            setRunningNodeId(sourceNode.id);
+            setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+            try {
+                const references = sourceNodeReferenceImages(sourceNode);
+                const width = sourceNode.metadata.naturalWidth || 1024;
+                const height = sourceNode.metadata.naturalHeight || 1024;
+                const tag = resolveTextureLineage(nodesRef.current, connectionsRef.current).get(sourceNode.id);
+                const results: Array<{ image: UploadedImage; role: PbrMapRole; textureSource?: string; slot?: number }> = [];
+                let lastError: unknown;
+                for (const role of PBR_MAP_ROLES) {
+                    const run = () => requestEdit({ ...generationConfig, count: "1" }, PBR_MAP_PROMPTS[role], references, { signal: controller.signal }).then((items) => items[0]);
+                    try {
+                        let image;
+                        try {
+                            image = await run();
+                        } catch (error) {
+                            const wait = retryAfterSeconds(error);
+                            if (wait === null) throw error;
+                            message.info(t("canvas.projectPage.multiviewRateLimited", { seconds: wait }));
+                            await multiviewDelay(wait * 1000, controller.signal);
+                            image = await run();
+                        }
+                        if (!image) throw new Error(t("canvas.projectPage.generationFailed"));
+                        const fitted = await fitTextureToSize(await (await fetch(image.dataUrl)).blob(), width, height);
+                        results.push({ image: await uploadImage(fitted), role, textureSource: tag?.source, slot: tag?.slot });
+                    } catch (error) {
+                        // A cancel stops the run; one failed map must not lose the others.
+                        if (isGenerationCanceled(error)) throw error;
+                        lastError = error;
+                    }
+                }
+                if (!results.length) throw lastError;
+                if (results.length < PBR_MAP_ROLES.length) message.warning(t("canvas.model3dTextures.partialFailure", { count: PBR_MAP_ROLES.length - results.length }));
+                placeTextureNodes(sourceNode, results);
+                setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)));
+                history.done();
+            } catch (error) {
+                history.fail(error);
+                const canceled = isGenerationCanceled(error);
+                if (!canceled) message.error(error instanceof Error ? error.message : t("canvas.projectPage.generationFailed"));
+                // The source image is untouched, so it returns to success rather than showing an error.
+                setNodes((prev) => prev.map((node) => (node.id === sourceNode.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)));
+            } finally {
+                finishGenerationRequest(sourceNode.id, controller);
+                setRunningNodeId((current) => (current === sourceNode.id ? null : current));
+            }
+        },
+        [finishGenerationRequest, isAiConfigReady, message, nodeGenerationConfig, openConfigDialog, placeTextureNodes, startGenerationRequest, t, trackGeneration],
+    );
+
+    /** Bake the chosen images into a copy of the model; the source node is left as it was. */
+    const applyModel3dTextureSelection = useCallback(
+        async (sourceNode: CanvasNodeData, selection: Model3dTextureSelection) => {
+            const hide = message.loading(t("canvas.model3dTextures.applying"), 0);
+            try {
+                const slots: MaterialSlotMaps[] = [];
+                for (const group of selection.slots) {
+                    const maps: MaterialMaps = {};
+                    for (const [role, id] of Object.entries(group.maps)) {
+                        const imageNode = id ? nodesRef.current.find((node) => node.id === id) : undefined;
+                        if (imageNode) maps[role as keyof MaterialMaps] = await readImageNodeBlob(imageNode);
+                    }
+                    slots.push({ slot: group.slot, maps });
+                }
+                const glb = await applyModel3dTextures(await resolveModel3dUrl(sourceNode), sourceNode.metadata?.mimeType, slots, selection.metalness);
+                const stored = await uploadMediaFile(glb, "model3d");
+                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Model3d];
+                const resultNode: CanvasNodeData = {
+                    id: nanoid(),
+                    type: CanvasNodeType.Model3d,
+                    title: t("canvas.model3dTextures.resultTitle"),
+                    position: { x: sourceNode.position.x + (sourceNode.width || spec.width) + 96, y: sourceNode.position.y + (sourceNode.height || spec.height) + 48 },
+                    width: spec.width,
+                    height: spec.height,
+                    // No model3dSourceTaskId: this glb was rebuilt locally, so Tripo follow-ups upload the file instead.
+                    metadata: { ...model3dMetadata(stored), prompt: t("canvas.model3dTextures.resultTitle") },
+                };
+                setNodes((prev) => [...prev, resultNode]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: resultNode.id }]);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t("canvas.projectPage.generationFailed"));
+            } finally {
+                hide();
+            }
+        },
+        [message, readImageNodeBlob, resolveModel3dUrl, t],
     );
 
     const importNodesToBlender = useCallback(
@@ -3056,14 +3282,9 @@ function InfiniteCanvasPage() {
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
-            const files = Array.from(event.target.files || []).filter(
-                (f) => f.type.startsWith("image/") || f.type.startsWith("video/") || isAudioFile(f),
-            );
-            if (!files.length) {
-                uploadTargetRef.current = null;
-                event.target.value = "";
-                return;
-            }
+            const picked = Array.from(event.target.files || []);
+            const { models, resources, rest: others } = await splitModel3dFiles(picked);
+            const files = others.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/") || isAudioFile(f));
 
             const target = uploadTargetRef.current;
             const basePosition =
@@ -3072,6 +3293,13 @@ function InfiniteCanvasPage() {
                     (containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2,
                     (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2,
                 );
+            // Models always become new nodes; replacing an image or video node with a model is not supported.
+            if (models.length) void createModel3dFileNodes(models, resources, basePosition);
+            if (!files.length) {
+                uploadTargetRef.current = null;
+                event.target.value = "";
+                return;
+            }
             const STAGGER = 40; // Offset between multiple imported files.
 
             // When replacing a target node, use the first file as the replacement and create the rest nearby.
@@ -3183,18 +3411,18 @@ function InfiniteCanvasPage() {
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createModel3dFileNodes, createVideoFileNode, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
-        (event: ReactDragEvent<HTMLDivElement>) => {
+        async (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const files = Array.from(event.dataTransfer.files).filter(
-                (item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item),
-            );
+            const basePos = screenToCanvas(event.clientX, event.clientY);
+            const { models, resources, rest } = await splitModel3dFiles(Array.from(event.dataTransfer.files));
+            if (models.length) void createModel3dFileNodes(models, resources, basePos);
+            const files = rest.filter((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!files.length) return;
 
-            const basePos = screenToCanvas(event.clientX, event.clientY);
             const STAGGER = 40;
             for (let i = 0; i < files.length; i++) {
                 const pos = { x: basePos.x + i * STAGGER, y: basePos.y + i * STAGGER };
@@ -3208,7 +3436,7 @@ function InfiniteCanvasPage() {
                 }
             }
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createModel3dFileNodes, createVideoFileNode, screenToCanvas],
     );
 
     const startTitleEditing = useCallback(() => {
@@ -4341,6 +4569,17 @@ function InfiniteCanvasPage() {
                                 cancelPendingConnectionCreate();
                                 setModel3dOpTarget({ nodeId: sourceId, op });
                             }}
+                            onExtractTexture={() => {
+                                const sourceId = pendingConnectionCreate.connection.nodeId;
+                                const source = nodeById.get(sourceId);
+                                cancelPendingConnectionCreate();
+                                if (source) void extractModel3dTexture(source);
+                            }}
+                            onApplyTextures={() => {
+                                const sourceId = pendingConnectionCreate.connection.nodeId;
+                                cancelPendingConnectionCreate();
+                                setModel3dTextureNodeId(sourceId);
+                            }}
                             onClose={cancelPendingConnectionCreate}
                         />
                     ) : null}
@@ -4371,6 +4610,10 @@ function InfiniteCanvasPage() {
                     onDownload={downloadNodeImage}
                     onMultiview={(node) => (node.metadata?.multiviewTaskId ? setMultiviewEditNodeId(node.id) : void runMultiviewImageOp(node))}
                     onBuiltinMultiview={(node) => void runMultiviewImageOp(node, undefined, "builtin")}
+                    onPbrLocal={(node) => void derivePbrLocal(node)}
+                    onPbrAi={(node) => void derivePbrAi(node)}
+                    onExtractModel3dTexture={(node) => void extractModel3dTexture(node)}
+                    onApplyModel3dTextures={(node) => setModel3dTextureNodeId(node.id)}
                     onModel3dOp={(node, op) => setModel3dOpTarget({ nodeId: node.id, op })}
                     onDownloadConvertedModel3d={(node) => void downloadConvertedModel3d(node)}
                     onImportToBlender={(node) => void importNodesToBlender([node])}
@@ -4479,7 +4722,7 @@ function InfiniteCanvasPage() {
                     />
                 ) : null}
 
-                <input ref={imageInputRef} type="file" multiple accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" multiple accept={`image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav,${MODEL3D_IMPORT_ACCEPT}`} className="hidden" onChange={handleImageInputChange} />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
                 <CanvasPluginManagerModal open={pluginManagerOpen} onClose={() => setPluginManagerOpen(false)} />
@@ -4529,6 +4772,17 @@ function InfiniteCanvasPage() {
                     onConfirm={(op, params) => {
                         setModel3dOpTarget(null);
                         if (model3dOpNode) void runModel3dOperation(model3dOpNode, op, params);
+                    }}
+                />
+                <CanvasModel3dTextureDialog
+                    node={model3dTextureNodeId ? nodeById.get(model3dTextureNodeId) || null : null}
+                    nodes={nodes}
+                    connections={connections}
+                    onCancel={() => setModel3dTextureNodeId(null)}
+                    onConfirm={(selection) => {
+                        const source = model3dTextureNodeId ? nodeById.get(model3dTextureNodeId) : undefined;
+                        setModel3dTextureNodeId(null);
+                        if (source) void applyModel3dTextureSelection(source, selection);
                     }}
                 />
 

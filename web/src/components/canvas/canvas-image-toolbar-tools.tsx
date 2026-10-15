@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { Blocks, Boxes, Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Blocks, Boxes, Brush, Camera, Copy, FileText, Grid2x2, Images, Layers, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 import i18n from "@/i18n";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "decompose" | "upscale" | "superResolve" | "angle" | "view" | "multiview" | "builtinMultiview";
+export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "decompose" | "upscale" | "superResolve" | "angle" | "view" | "multiview" | "builtinMultiview" | "pbrLocal" | "pbrAi";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -22,6 +22,8 @@ export type ImageToolHandlers = {
     onReversePrompt: (node: CanvasNodeData) => void;
     onMultiview: (node: CanvasNodeData) => void;
     onBuiltinMultiview: (node: CanvasNodeData) => void;
+    onPbrLocal: (node: CanvasNodeData) => void;
+    onPbrAi: (node: CanvasNodeData) => void;
 };
 
 export type ImageToolDefinition = {
@@ -39,8 +41,8 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-// Bumped to v9 so the decompose tool, visible by default, also reaches users who had saved a tool set.
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v9";
+// Bumped to v10 so the PBR map tools, visible by default, also reach users who had saved a tool set.
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v10";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download"];
 
@@ -127,6 +129,23 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: () => i18n.t("canvas.imageTools.multiviewTitle"),
         icon: () => <Boxes className="size-4" />,
         run: (node, handlers) => handlers.onMultiview(node),
+    },
+    {
+        // Derived locally from the pixels, so it is free and stays aligned with the model's UVs.
+        id: "pbrLocal",
+        defaultVisible: true,
+        label: () => i18n.t("canvas.imageTools.pbrLocal"),
+        title: () => i18n.t("canvas.imageTools.pbrLocalTitle"),
+        icon: () => <Layers className="size-4" />,
+        run: (node, handlers) => handlers.onPbrLocal(node),
+    },
+    {
+        id: "pbrAi",
+        defaultVisible: false,
+        label: () => i18n.t("canvas.imageTools.pbrAi"),
+        title: () => i18n.t("canvas.imageTools.pbrAiTitle"),
+        icon: () => <Layers className="size-4" />,
+        run: (node, handlers) => handlers.onPbrAi(node),
     },
     {
         id: "upscale",

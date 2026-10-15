@@ -112,6 +112,12 @@ export type CanvasNodeMetadata = {
     // Signed Tripo URL for the conversion output; Bambu Studio can fetch it while it is still valid.
     model3dConvertedUrl?: string;
     model3dConvertTaskId?: string;
+    // A texture image taken from or derived for a 3D node: which model it belongs to and which map it fills,
+    // so applying textures can preselect the newest image for each role.
+    model3dTextureSource?: string;
+    model3dTextureRole?: "baseColor" | "normal" | "roughness" | "ao";
+    // Which of the model's textures this image replaces, in extract order; a model can carry several.
+    model3dTextureSlot?: number;
     // Which multiview angle an image node holds, and the task that produced the set.
     multiviewView?: MultiviewView;
     multiviewTaskId?: string;

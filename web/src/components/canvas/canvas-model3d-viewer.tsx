@@ -329,6 +329,13 @@ export function CanvasModel3dViewer({ src, poster, theme, interactive, mimeType,
                     // Looking down the X axis: level with the model, no elevation. The 1.2 keeps the same framing
                     // margin the previous 3/4 angle had, so the model does not suddenly fill the frame edge to edge.
                     const home = new THREE.Vector3(distance * 1.2, 0, 0);
+                    // Imported models come in any unit (a Sketchfab export can be tens of thousands of units
+                    // tall), so the clip planes follow the model instead of the fixed 0.1–1000 a Tripo-sized
+                    // mesh fits in; otherwise the whole model sits past the far plane and the view stays empty.
+                    camera.near = distance / 1000;
+                    camera.far = distance * 100;
+                    camera.updateProjectionMatrix();
+                    controls.maxDistance = distance * 20;
                     camera.position.copy(home);
                     camera.lookAt(0, 0, 0);
                     controls.target.set(0, 0, 0);
