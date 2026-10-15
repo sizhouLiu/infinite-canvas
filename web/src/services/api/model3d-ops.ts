@@ -60,7 +60,7 @@ export const RETARGET_PRESETS: Record<string, string[]> = {
 };
 
 /** Which follow-up operations a produced model can feed. Retarget and complete accept nothing else. */
-export type Model3dTaskKind = "generate" | "texture" | "convert" | "rig" | "retarget" | "segment" | "complete" | "decimate" | "multiview";
+export type Model3dTaskKind = "generate" | "texture" | "convert" | "rig" | "retarget" | "segment" | "complete" | "decimate" | "uv" | "multiview";
 
 export type Model3dOpResult = { taskId: string; modelUrl: string; previewUrl?: string };
 export type MultiviewResult = { taskId: string; views: Array<{ view: MultiviewView; url: string }> };
@@ -162,7 +162,7 @@ export async function resolveOpInput(config: AiConfig, source: { taskId?: string
     const blob = await getMediaBlob(source.storageKey);
     if (!blob) throw new Error(apiText("model3dOpSourceMissing"));
     const requestConfig = opRequestConfig(config);
-    return uploadTripoFile(requestConfig, new File([blob], "model.glb", { type: source.mimeType || "model/gltf-binary" }), options);
+    return uploadTripoFile(requestConfig, new File([blob], `model.${source.mimeType?.includes("fbx") ? "fbx" : "glb"}`, { type: source.mimeType || "model/gltf-binary" }), options);
 }
 
 export function requestModel3dTexture(config: AiConfig, input: string, params: { model?: string; textureQuality?: string; pbr?: boolean; textureAlignment?: string }, options?: Model3dOpOptions) {
@@ -266,6 +266,14 @@ export function requestModel3dDecimate(config: AiConfig, input: string, params: 
         },
         options,
     );
+}
+
+/**
+ * Re-unwrap the model's UVs. With `bake` the existing textures, skeleton and animation are carried onto the new
+ * layout; without it only the UV'd geometry comes back. Tripo fails (and refunds) inputs over 80k triangles.
+ */
+export function requestModel3dUv(config: AiConfig, input: string, params: { bake?: boolean }, options?: Model3dOpOptions) {
+    return runModelOp(config, "/mesh/uv", { input, model: "default", ...(params.bake === undefined ? {} : { bake: params.bake }) }, options);
 }
 
 /** Multiview generation from a single image; the four view URLs come back on one task. */

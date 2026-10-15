@@ -9,6 +9,12 @@ The current release needs manual verification in these areas:
 
 - 导演台节点：右键或从 3D / 图片节点拖线新建「导演台」，双击打开全屏导演台。连入的 3D 模型（GLB）应作为道具出现在场景里，重复打开不会重复添加；连入的图片应成为全景背景。机位截图点「发送到画布」后，在导演台右侧生成图片节点，并把最后一张截图设为导演台节点缩略图。关闭再打开、刷新页面后，场景应按节点恢复，两个导演台节点的场景互不影响。本地导入 FBX / OBJ / GLB 模型后刷新，模型库仍在。`node scripts/dev.mjs` 会同时启动导演台开发服务（5174）；Docker 和 Vercel 构建会先构建导演台。没有在浏览器里实测过。
 
+- Model import: uploading or dropping GLB and FBX files should each create a previewable 3D node. Selecting an OBJ together with its MTL and referenced textures should create one textured 3D node, without the textures also appearing as image nodes; missing textures should be listed in a warning. Tripo operations such as retexture and Smart UV should upload imported models correctly. Models in large units (for example a Sketchfab GLB tens of thousands of units tall) should still be fully framed and not clipped while zooming.
+
+- Smart UV: running Smart UV on a 3D node should call `/mesh/uv`; with "Keep textures" on the new node keeps its texture, with it off only geometry comes back. Models over 80k triangles fail and are refunded.
+
+- 3D 换皮贴图：对一个有颜色贴图的 3D 节点执行「提取贴图」，应在右侧生成颜色贴图图片节点。对该图片执行「推导 PBR」，应再生成法线、粗糙度、AO 三张图，且与原图同尺寸、像素对齐。再对原 3D 节点执行「应用贴图」，默认选中这四张图，确认后应新增一个换皮 3D 节点（原节点不变），查看器里能看到法线凹凸；不消耗 Tripo 积分。有多张贴图的模型（例如 `D:\样例rknights_endfield_-laevatain-.glb`）应每张贴图各生成一个图片节点，标题带材质名；「应用贴图」按贴图分组，只改某一组时其余材质保持原样。无贴图的模型应提示没有颜色贴图。图片工具「AI 生成 PBR」会消耗图片额度，结果可能与 UV 错位，需单独验证。对提取出的颜色贴图做 AI 改图或局部重绘后，再打开「应用贴图」，颜色贴图应默认选中最新改好的那张；对改好的图推导出的 PBR 贴图也应归到原模型下。
+
 - 3D 后处理失败重试：对一个已有绑骨模型执行「套用动画」并让任务失败后点击重试，确认请求仍为 `/animations/retarget`，不会把「套用动画」作为文生 3D 提示词；重试应复用原失败节点而不是新增节点。刷新页面或网络中断后重试时，应继续查询已保存的任务 ID，不应重复创建付费任务。
 
 - Blender MCP setup guide: verify upstream interactive setup and manual installation in `docs/setup-blender-mcp.md`, preserving existing MCP entries and checking telemetry settings. Confirm a real read-only scene query from the client; installation alone must not imply that the separate 60600 import bridge is configured. Upstream documentation was reviewed, but local installation was not performed.

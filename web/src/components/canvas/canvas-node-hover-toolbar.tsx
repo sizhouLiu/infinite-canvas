@@ -43,6 +43,10 @@ type CanvasNodeHoverToolbarProps = {
     onUngroup?: (node: CanvasNodeData) => void;
     onMultiview: (node: CanvasNodeData) => void;
     onBuiltinMultiview: (node: CanvasNodeData) => void;
+    onPbrLocal: (node: CanvasNodeData) => void;
+    onPbrAi: (node: CanvasNodeData) => void;
+    onExtractModel3dTexture?: (node: CanvasNodeData) => void;
+    onApplyModel3dTextures?: (node: CanvasNodeData) => void;
     onModel3dOp?: (node: CanvasNodeData, op: Model3dOpId) => void;
     onDownloadConvertedModel3d?: (node: CanvasNodeData) => void;
     onImportToBlender?: (node: CanvasNodeData) => void;
@@ -88,6 +92,10 @@ export function CanvasNodeHoverToolbar({
     onUngroup,
     onMultiview,
     onBuiltinMultiview,
+    onPbrLocal,
+    onPbrAi,
+    onExtractModel3dTexture,
+    onApplyModel3dTextures,
     onModel3dOp,
     onDownloadConvertedModel3d,
     onImportToBlender,
@@ -145,7 +153,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, t("common.promptCopied"));
     };
-    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onDecompose, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt, onMultiview, onBuiltinMultiview });
+    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onDecompose, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt, onMultiview, onBuiltinMultiview, onPbrLocal, onPbrAi });
 
     function openImageToolSettings() {
         onKeep(activeNode.id);
@@ -218,7 +226,7 @@ export function CanvasNodeHoverToolbar({
                 ))}
                 {hasImage ? <ToolbarAction id="more" title={t("canvas.imageTools.configure")} label={t("canvas.imageTools.more")} icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
                 {hasModel3d && onModel3dOp && onDownloadConvertedModel3d ? (
-                    <CanvasModel3dOpsPopover node={activeNode} onSelect={(op) => onModel3dOp(activeNode, op)} onDownloadConverted={onDownloadConvertedModel3d} />
+                    <CanvasModel3dOpsPopover node={activeNode} onSelect={(op) => onModel3dOp(activeNode, op)} onDownloadConverted={onDownloadConvertedModel3d} onExtractTexture={onExtractModel3dTexture} onApplyTextures={onApplyModel3dTextures} />
                 ) : null}
             </div>
             {hasImage ? (

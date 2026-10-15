@@ -2,7 +2,7 @@ import { COMPLETION_MODES, CONVERT_FORMATS, DECIMATE_MODELS, RIG_MODELS, RIG_OUT
 import i18n from "@/i18n";
 import type { CanvasNodeData } from "@/types/canvas";
 
-export type Model3dOpId = "texture" | "convert" | "rig" | "retarget" | "segment" | "complete" | "decimate" | "multiview";
+export type Model3dOpId = "texture" | "convert" | "rig" | "retarget" | "segment" | "complete" | "decimate" | "uv" | "multiview";
 
 /** One parameter row in the shared operation dialog. */
 export type Model3dOpField =
@@ -81,6 +81,11 @@ const OP_DEFINITIONS = (): Record<Model3dOpId, Model3dOpDefinition> => ({
             { key: "faceLimit", type: "number", label: i18n.t("canvas.model3dOps.fields.faceLimit"), placeholder: i18n.t("settingsPanels.model3d.faceLimitAuto"), min: 1 },
             { key: "quad", type: "switch", label: i18n.t("canvas.model3dOps.fields.quad"), defaultValue: false },
         ],
+    },
+    uv: {
+        // Accepts any model source, so an imported or locally re-skinned node can use it too.
+        id: "uv",
+        fields: [{ key: "bake", type: "switch", label: i18n.t("canvas.model3dOps.fields.bake"), defaultValue: true }],
     },
     multiview: { id: "multiview", fields: [] },
 });

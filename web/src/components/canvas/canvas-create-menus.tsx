@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Box, Clapperboard, ImageIcon, List, Music2, Settings2, Video, X } from "lucide-react";
+import { Box, Clapperboard, ImageDown, ImageIcon, List, Music2, PaintBucket, Settings2, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -19,12 +19,16 @@ export function ConnectionCreateMenu({
     sourceNode,
     onCreate,
     onModel3dOp,
+    onExtractTexture,
+    onApplyTextures,
     onClose,
 }: {
     pending: PendingConnectionCreate;
     sourceNode?: CanvasNodeData;
     onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Model3d | CanvasNodeType.DirectorDesk) => void;
     onModel3dOp?: (op: Model3dOpId) => void;
+    onExtractTexture?: () => void;
+    onApplyTextures?: () => void;
     onClose: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -53,6 +57,8 @@ export function ConnectionCreateMenu({
                             const blocked = model3dOpBlockedReason(op, sourceNode);
                             return <ConnectionCreateOption key={op} theme={theme} icon={<span className="[&>svg]:size-5">{MODEL3D_OP_ICONS[op]}</span>} title={model3dOpLabel(op)} disabled={Boolean(blocked)} hint={blocked || undefined} onClick={() => onModel3dOp?.(op)} />;
                         })}
+                        {onExtractTexture ? <ConnectionCreateOption theme={theme} icon={<ImageDown className="size-5" />} title={t("canvas.model3dTextures.extract")} onClick={onExtractTexture} /> : null}
+                        {onApplyTextures ? <ConnectionCreateOption theme={theme} icon={<PaintBucket className="size-5" />} title={t("canvas.model3dTextures.apply")} onClick={onApplyTextures} /> : null}
                         <div className="my-1 border-t" style={{ borderColor: theme.node.stroke }} />
                     </>
                 ) : null}
