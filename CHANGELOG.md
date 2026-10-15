@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-+ [修复] Windows 本地开发打开导演台节点报 500：导演台开发服务改为监听 127.0.0.1，并修正 Vite 允许目录在 Windows 下拼成 `D:/D:/…` 导致的 403。
++ [修复] Windows 本地开发打开导演台节点报 500：导演台开发服务改为监听 127.0.0.1，并修正 Vite 允许目录在 Windows 下拼成 `D:/D:/…` 导致的 403。导演台不再把 macOS 专用的 `@rollup/rollup-darwin-arm64` 写成直接依赖，Windows / Linux 可以直接 `npm ci`。
 
 + [新增] 拖动节点时显示对齐辅助线，并吸附到附近节点的边缘和中心；按住 Alt 可自由拖动。
 + [新增] Agent 新增 `canvas_group_nodes` / `canvas_ungroup_nodes` 工具，`canvas_apply_ops` 支持 `group_nodes` / `ungroup_nodes` 操作。
