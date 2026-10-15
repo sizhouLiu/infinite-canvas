@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
@@ -7,11 +8,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
+    // Bind IPv4 explicitly: the canvas proxies to 127.0.0.1, while "localhost" may resolve to ::1 only on Windows.
+    host: "127.0.0.1",
     fs: {
-      allow: [
-        decodeURIComponent(new URL(".", import.meta.url).pathname),
-        decodeURIComponent(new URL("../模型库", import.meta.url).pathname),
-      ],
+      // fileURLToPath, not URL.pathname: on Windows the pathname is "/D:/…" and Vite turns it into "D:/D:/…".
+      allow: [fileURLToPath(new URL(".", import.meta.url)), fileURLToPath(new URL("../模型库", import.meta.url))],
     },
   },
   build: {
