@@ -36,6 +36,7 @@ import { model3dOpDefinition, model3dOpLabel, type Model3dOpId } from "@/compone
 import { CanvasModel3dOpDialog, type Model3dOpParams } from "@/components/canvas/canvas-model3d-op-dialog";
 import { CanvasModel3dTextureDialog, type Model3dTextureSelection } from "@/components/canvas/canvas-model3d-texture-dialog";
 import { draggedRect, snapMovingRect, type SnapGuide } from "@/lib/canvas/canvas-snap";
+import { alignNodes, canAlign, moveNodes, type AlignMode } from "@/lib/canvas/canvas-align";
 import { MODEL3D_IMPORT_ACCEPT, prepareModel3dFile, splitModel3dFiles } from "@/lib/canvas/canvas-model3d-import";
 import { applyModel3dTextures, derivePbrMaps, extractModel3dBaseColors, fitTextureToSize, PBR_MAP_PROMPTS, PBR_MAP_ROLES, resolveTextureLineage, type MaterialMaps, type MaterialSlotMaps, type PbrMapRole } from "@/lib/canvas/canvas-model3d-textures";
 import { CanvasMultiviewEditDialog } from "@/components/canvas/canvas-multiview-edit-dialog";
@@ -2321,6 +2322,16 @@ function InfiniteCanvasPage() {
             if (isModifierShortcut && !event.altKey && key === "v") {
                 event.preventDefault();
                 if (!pasteCopiedNodes()) void pasteSystemClipboard();
+                return;
+            }
+
+            // Arrow keys nudge the selection 1px, or 10px with Shift; a selected group carries its members.
+            if (event.key.startsWith("Arrow") && selectedNodeIdsRef.current.size && !isModifierShortcut) {
+                event.preventDefault();
+                const step = event.shiftKey ? 10 : 1;
+                const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+                const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+                setNodes((prev) => moveNodes(prev, selectedNodeIdsRef.current, dx, dy));
                 return;
             }
 
@@ -4688,6 +4699,13 @@ function InfiniteCanvasPage() {
                         onUngroup={ungroupSelection}
                         onImportToBlender={() => void importNodesToBlender(selectedNodes)}
                         onOpenInBambuStudio={() => void openNodesInBambuStudio(selectedNodes)}
+                        canDistribute={canAlign(nodes, selectedNodeIds, "distributeX")}
+                        onAlign={(mode: AlignMode) => setNodes((prev) => alignNodes(prev, selectedNodeIdsRef.current, mode))}
+                        onDuplicate={() => {
+                            copySelectedNodes();
+                            pasteCopiedNodes();
+                        }}
+                        onDelete={() => deleteNodes(new Set(selectedNodeIdsRef.current))}
                     />
                 ) : null}
 

@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
-import { Box, Group, Printer, Ungroup } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, AlignVerticalDistributeCenter, Box, Copy, Group, Printer, Trash2, Ungroup } from "lucide-react";
 import { Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import type { AlignMode } from "@/lib/canvas/canvas-align";
 import { nodeBounds } from "@/lib/canvas/canvas-node-geometry";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData, ViewportTransform } from "@/types/canvas";
@@ -22,6 +23,10 @@ export function CanvasSelectionToolbar({
     onUngroup,
     onImportToBlender,
     onOpenInBambuStudio,
+    canDistribute,
+    onAlign,
+    onDuplicate,
+    onDelete,
 }: {
     nodes: CanvasNodeData[];
     viewport: ViewportTransform;
@@ -34,6 +39,10 @@ export function CanvasSelectionToolbar({
     onUngroup: () => void;
     onImportToBlender?: () => void;
     onOpenInBambuStudio?: () => void;
+    canDistribute: boolean;
+    onAlign: (mode: AlignMode) => void;
+    onDuplicate: () => void;
+    onDelete: () => void;
 }) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -44,7 +53,22 @@ export function CanvasSelectionToolbar({
     const top = viewport.y + bounds.top * viewport.k - SELECTION_PAD;
     const width = (bounds.right - bounds.left) * viewport.k + SELECTION_PAD * 2;
     const height = (bounds.bottom - bounds.top) * viewport.k + SELECTION_PAD * 2;
-    const showActions = showToolbar && (canGroup || canUngroup || canImportToBlender || canOpenInBambuStudio);
+    // Align, duplicate and delete apply to any multi-selection, so the bar shows whenever dragging stops.
+    const showActions = showToolbar;
+    const alignActions: Array<{ mode: AlignMode; icon: ReactNode }> = [
+        { mode: "left", icon: <AlignStartVertical className="size-4" /> },
+        { mode: "centerX", icon: <AlignCenterVertical className="size-4" /> },
+        { mode: "right", icon: <AlignEndVertical className="size-4" /> },
+        { mode: "top", icon: <AlignStartHorizontal className="size-4" /> },
+        { mode: "centerY", icon: <AlignCenterHorizontal className="size-4" /> },
+        { mode: "bottom", icon: <AlignEndHorizontal className="size-4" /> },
+        ...(canDistribute
+            ? [
+                  { mode: "distributeX" as const, icon: <AlignHorizontalDistributeCenter className="size-4" /> },
+                  { mode: "distributeY" as const, icon: <AlignVerticalDistributeCenter className="size-4" /> },
+              ]
+            : []),
+    ];
 
     return (
         <>
@@ -71,23 +95,29 @@ export function CanvasSelectionToolbar({
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                 >
+                    {alignActions.map((action) => (
+                        <SelectionAction key={action.mode} title={t(`canvas.selectionToolbar.align.${action.mode}`)} icon={action.icon} onClick={() => onAlign(action.mode)} />
+                    ))}
+                    <span className="mx-1 h-6 w-px bg-black/10" />
                     {canGroup ? <SelectionAction title={t("canvas.nodeToolbar.groupTitle")} label={t("canvas.nodeToolbar.group")} icon={<Group className="size-4" />} onClick={onGroup} /> : null}
                     {canUngroup ? <SelectionAction title={t("canvas.nodeToolbar.ungroupTitle")} label={t("canvas.nodeToolbar.ungroup")} icon={<Ungroup className="size-4" />} onClick={onUngroup} /> : null}
                     {canImportToBlender && onImportToBlender ? <SelectionAction title={t("canvas.blenderBridge.title")} label={t("canvas.blenderBridge.label")} icon={<Box className="size-4" />} onClick={onImportToBlender} /> : null}
                     {canOpenInBambuStudio && onOpenInBambuStudio ? <SelectionAction title={t("canvas.bambuStudio.title")} label={t("canvas.bambuStudio.label")} icon={<Printer className="size-4" />} onClick={onOpenInBambuStudio} /> : null}
+                    <SelectionAction title={t("canvas.selectionToolbar.duplicate")} icon={<Copy className="size-4" />} onClick={onDuplicate} />
+                    <SelectionAction title={t("canvas.selectionToolbar.delete")} icon={<Trash2 className="size-4 text-[#ef4444]" />} onClick={onDelete} />
                 </div>
             ) : null}
         </>
     );
 }
 
-function SelectionAction({ title, label, icon, onClick }: { title: string; label: string; icon: ReactNode; onClick: () => void }) {
+function SelectionAction({ title, label, icon, onClick }: { title: string; label?: string; icon: ReactNode; onClick: () => void }) {
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
             <button type="button" className="group relative flex h-12 items-center whitespace-nowrap px-1.5" onClick={onClick} aria-label={title}>
-                <span className="flex h-9 items-center gap-2 rounded-lg px-2.5 transition group-hover:bg-[#f0f0f1]">
+                <span className={`flex h-9 items-center gap-2 rounded-lg transition group-hover:bg-[#f0f0f1] ${label ? "px-2.5" : "px-2"}`}>
                     {icon}
-                    <span>{label}</span>
+                    {label ? <span>{label}</span> : null}
                 </span>
             </button>
         </Tooltip>

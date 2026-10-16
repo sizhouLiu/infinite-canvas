@@ -7,6 +7,8 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Multi-selection align and distribute: after box-selecting or Shift-clicking several nodes, the toolbar should show align and distribute buttons (distribute needs at least 3). Aligning should line up edges or centers, distributing should make neighbour gaps equal, and a selected group should move with its members. Duplicate should copy every selected node and delete should remove them all. Arrow keys nudge 1px, Shift+arrow 10px, and both can be undone.
+
 - Agent drives the director desk: with one director desk node on the canvas, `director_desk_command` with `action: "get_scene"` should open the desk if it is closed and return the scene, body type and pose options, and canvas assets. Then check add_character (with pose), add_canvas_asset (model into the scene, image as panorama), set_transform, set_pose, delete_objects, add_camera, set_aspect_ratio and capture; after capture the shots should appear as image nodes on the canvas. With several desks and no nodeId the tool should ask for one. In manual-confirm mode the tool should ask before running.
 
 - Director desk reads the canvas: with 3D and image nodes on the canvas that are not connected to the desk, opening the desk → Model library → "画布" should list all of them (3D with previews, images tagged as panorama). Clicking a 3D item adds it to the scene without duplicating the asset on repeat clicks; clicking an image sets it as the panorama. Adding or deleting canvas nodes while the desk is open should update the list. Connected nodes still import automatically.
