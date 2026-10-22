@@ -15,7 +15,20 @@ export type Model3dOpParams = Record<string, string | number | boolean>;
  * separate panel per endpoint. Retarget is the one special case: its animation list depends on the rig
  * type the model was rigged with, so the options are computed here instead of being a static enum.
  */
-export function CanvasModel3dOpDialog({ op, node, onCancel, onConfirm }: { op: Model3dOpId | null; node: CanvasNodeData | null; onCancel: () => void; onConfirm: (op: Model3dOpId, params: Model3dOpParams) => void }) {
+export function CanvasModel3dOpDialog({
+    op,
+    node,
+    referenceImageCount = 0,
+    onCancel,
+    onConfirm,
+}: {
+    op: Model3dOpId | null;
+    node: CanvasNodeData | null;
+    /** Images wired into the 3D node; retexture uses them as texture references. */
+    referenceImageCount?: number;
+    onCancel: () => void;
+    onConfirm: (op: Model3dOpId, params: Model3dOpParams) => void;
+}) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [params, setParams] = useState<Model3dOpParams>({});
@@ -71,6 +84,15 @@ export function CanvasModel3dOpDialog({ op, node, onCancel, onConfirm }: { op: M
                 {op === "retarget" && !animationOptions.length ? (
                     <p className="text-xs" style={{ color: "#f87171" }}>
                         {t("canvas.model3dOps.noAnimationForRigType")}
+                    </p>
+                ) : null}
+                {op === "texture" ? (
+                    <p className="text-xs" style={{ color: theme.node.muted }}>
+                        {referenceImageCount === 0
+                            ? t("canvas.model3dOps.textureNoReference")
+                            : referenceImageCount === 1
+                              ? t("canvas.model3dOps.textureImageReference")
+                              : t("canvas.model3dOps.textureMultiviewReference", { count: Math.min(referenceImageCount, 4) })}
                     </p>
                 ) : null}
                 {op === "rig" ? (
