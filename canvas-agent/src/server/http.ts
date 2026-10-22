@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import express, { type NextFunction, type Request, type Response } from "express";
 
 import { runClaudeTurn } from "../agent/claude.js";
@@ -188,6 +191,12 @@ export function startHttpServer() {
         const file = await stat(filePath);
         await revealLocalFile(filePath, file.isDirectory());
         res.json({ ok: true });
+    }));
+    /** Agent 下载画布文件：请求体直接写入用户「下载」目录，不弹浏览器保存框。 */
+    app.post("/agent/downloads", route(async (req, res) => {
+        const name = path.basename(String(req.query.name || "")).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
+        if (!name) return res.status(400).json({ ok: false, error: "文件名无效" });
+        res.json({ ok: true, path: await writeDownload(req, name) });
     }));
     app.post("/agent/local-image", route(async (req, res) => {
         const filePath = String(req.body?.path || "");
@@ -479,6 +488,21 @@ export function startHttpServer() {
             }).finally(() => session.endCodexMutation()).catch(() => undefined);
         }
     });
+}
+
+/** 写入下载目录，同名文件追加序号，不覆盖已有文件。 */
+async function writeDownload(req: Request, name: string) {
+    const ext = path.extname(name);
+    const base = name.slice(0, name.length - ext.length);
+    for (let index = 0; ; index += 1) {
+        const filePath = path.join(os.homedir(), "Downloads", index ? `${base} (${index})${ext}` : name);
+        try {
+            await pipeline(req, createWriteStream(filePath, { flags: "wx" }));
+            return filePath;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        }
+    }
 }
 
 /** 将异步 Express 路由异常交给统一错误处理中间件。 */

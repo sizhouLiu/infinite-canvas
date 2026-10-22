@@ -6,6 +6,7 @@ import { audioExtension, imageExtension, model3dExtension } from "@/lib/canvas/c
 import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
 import { CanvasNodeType } from "@/types/canvas";
 import { openDirectorDeskIds, sendDirectorDeskCommand } from "@/lib/canvas/director-desk-bridge";
+import { saveAgentDownload } from "@/services/api/canvas-agent";
 import { fetchPrompts } from "@/services/api/prompts";
 import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
@@ -61,7 +62,7 @@ export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
 };
 
 type SiteToolInput = Record<string, unknown>;
-type SiteToolContext = { canvasSnapshot?: CanvasAgentSnapshot | null; onBlenderImport?: (task: Promise<void>, count: number) => void };
+type SiteToolContext = { canvasSnapshot?: CanvasAgentSnapshot | null; agent?: { endpoint: string; token: string }; onBlenderImport?: (task: Promise<void>, count: number) => void };
 type GenerationStatus = "idle" | "queued" | "running" | "succeeded" | "failed";
 type GenerationStatusItem = { id: string; source: "canvas" | "image" | "video"; status: GenerationStatus; kind?: string; title?: string; prompt?: string; projectId?: string; createdAt?: string; updatedAt?: string; successCount?: number; failCount?: number; error?: string };
 
@@ -70,7 +71,7 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
         case "canvas_list_projects":
             return listCanvasProjects(input);
         case "canvas_download_nodes":
-            return downloadCanvasNodes(input, context.canvasSnapshot);
+            return downloadCanvasNodes(input, context);
         case "canvas_import_to_blender":
             return importCanvasNodesToBlender(input, context);
         case "director_desk_command":
@@ -96,21 +97,28 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
     }
 }
 
-function downloadCanvasNodes(input: SiteToolInput, snapshot?: CanvasAgentSnapshot | null) {
+/** 通过本机 Canvas Agent 直接写入「下载」目录；读不到文件内容（如跨域链接）时退回浏览器下载。 */
+async function downloadCanvasNodes(input: SiteToolInput, context: SiteToolContext) {
+    const snapshot = context.canvasSnapshot;
     if (!snapshot) throw new Error(siteText("openCanvasFirst"));
     const ids = nodeIds(input, snapshot);
     const targets = snapshot.nodes.filter((node) => ids.has(node.id));
-    const downloaded: Array<{ id: string; title: string; fileName: string }> = [];
-    targets.forEach((node) => {
+    const downloaded: Array<{ id: string; title: string; fileName: string; path?: string }> = [];
+    for (const node of targets) {
         const content = node.metadata?.content;
-        if (!content || (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Model3d)) return;
+        if (!content || (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio && node.type !== CanvasNodeType.Model3d)) continue;
         const extension = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata?.mimeType) : node.type === CanvasNodeType.Model3d ? model3dExtension(node.metadata?.mimeType) : imageExtension(content);
         const fileName = `canvas-${node.type}-${node.id}.${extension}`;
-        saveAs(content, fileName);
-        downloaded.push({ id: node.id, title: node.title || node.id, fileName });
-    });
+        const blob = context.agent ? await fetch(content).then((res) => (res.ok ? res.blob() : null)).catch(() => null) : null;
+        if (context.agent && blob) {
+            downloaded.push({ id: node.id, title: node.title || node.id, fileName, path: await saveAgentDownload(context.agent.endpoint, context.agent.token, fileName, blob) });
+        } else {
+            saveAs(content, fileName);
+            downloaded.push({ id: node.id, title: node.title || node.id, fileName });
+        }
+    }
     if (!downloaded.length) throw new Error(siteText("noDownloadableNodes"));
-    return { ok: true, status: "download_triggered", downloaded };
+    return { ok: true, status: downloaded.every((item) => item.path) ? "saved" : "download_triggered", downloaded };
 }
 
 function importCanvasNodesToBlender(input: SiteToolInput, context: SiteToolContext) {

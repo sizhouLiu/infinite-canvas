@@ -5,6 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- Agent 下载直接落盘：重启 Canvas Agent 后，让 Agent 用 `canvas_download_nodes` 下载画布上的图片 / 视频 / 3D 节点，不应弹出浏览器保存框，文件应直接出现在 `~/Downloads`，返回结果里带本地路径；同名文件应自动加 `(1)` 序号而不是覆盖。
+
 - 多选对齐与分布：框选或 Shift 点选多个节点后，工具栏应出现对齐和等距分布按钮（分布需至少 3 个）；对齐后节点边缘或中心一致，等距分布后相邻间隙相等，选中的组带着成员一起移动。复制一份应创建全部选中节点的副本，删除应移除全部选中节点。方向键微移 1px，Shift+方向键微移 10px，都可撤销。
 
 - Agent 操作导演台：画布上有一个导演台节点时，让 Agent 调用 `director_desk_command`（`action: "get_scene"`），导演台未打开应自动打开并返回场景、可选体型与姿势、画布资源。依次验证 add_character（含 pose）、add_canvas_asset（模型进场景、图片成全景）、set_transform、set_pose、delete_objects、add_camera、set_aspect_ratio、capture；capture 后画布上应出现截图图片节点。多个导演台时不传 nodeId 应提示指定。开启「手动确认」时该工具应请求确认。

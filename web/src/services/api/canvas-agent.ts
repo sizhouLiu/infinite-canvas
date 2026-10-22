@@ -80,6 +80,12 @@ export async function revealAgentLocalFile(endpoint: string, token: string, path
     await fetchAgentJson(endpoint, token, "/agent/local-file/reveal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
 }
 
+/** 让本机 Canvas Agent 把文件直接写入用户「下载」目录，返回本地绝对路径。 */
+export async function saveAgentDownload(endpoint: string, token: string, fileName: string, blob: Blob) {
+    const result = await fetchAgentJson<{ path?: string }>(endpoint, token, `/agent/downloads?name=${encodeURIComponent(fileName)}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: blob });
+    return result.path || "";
+}
+
 export function resolveAgentMessageAssetUrl(endpoint: string, token: string, value: string) {
     const match = AGENT_MESSAGE_ASSET_PATTERN.exec(value);
     if (!match) return value.startsWith("agent-asset:") ? "" : value;

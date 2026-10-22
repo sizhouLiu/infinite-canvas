@@ -335,7 +335,7 @@ function siteToolSummary(name: string, result: unknown, input: unknown) {
     const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
     if (name === "site_navigate") return tr("openedRoute", { route: routeName(stringText(objectField(input, "path")) || "/") });
     if (name === "canvas_list_projects") return tr("canvasCount", { count: numberField(data, "total") });
-    if (name === "canvas_download_nodes") return i18n.t("agent.siteTools.downloadsTriggered", { count: Array.isArray(data.downloaded) ? data.downloaded.length : 0 });
+    if (name === "canvas_download_nodes") return i18n.t(data.status === "saved" ? "agent.siteTools.downloadsSaved" : "agent.siteTools.downloadsTriggered",{ count: Array.isArray(data.downloaded) ? data.downloaded.length : 0 });
     if (name === "canvas_import_to_blender") return i18n.t("agent.siteTools.blenderImportStarted", { count: numberField(data, "count") });
     if (name === "prompts_search") return tr("promptCount", { count: numberField(data, "total") });
     if (name === "assets_list") return tr("assetCount", { count: numberField(data, "total") });

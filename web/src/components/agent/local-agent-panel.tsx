@@ -810,6 +810,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 addEventLog(toolName(payload.name), payload, payload);
                 const result = await runSiteTool(payload.name, payload.input || {}, navigate, {
                     canvasSnapshot: canvasContextRef.current?.snapshot || null,
+                    agent: { endpoint, token },
                     onBlenderImport: (task, count) => {
                         const hide = message.loading(t("canvas.blenderBridge.importing", { count }), 0);
                         void task.then(() => {

@@ -166,7 +166,7 @@ export const toolInputSchemas = {
 export const toolDescriptions: Record<ToolName, string> = {
     site_navigate: "跳转网站页面。path 可为 / (首页)、/canvas (我的画布)、/canvas/:id (指定画布)、/image (生图工作台)、/video (视频创作台)、/prompts (提示词库)、/assets (我的素材)、/config (配置)。操作画布前若不在画布页，先用本工具打开画布。",
     canvas_list_projects: "列出用户全部画布（仅标题、创建/更新时间、节点数、连线数，不含完整数据），支持 keyword 搜索和 page/pageSize 分页。返回的 id 可配合 site_navigate 跳转到 /canvas/:id 打开对应画布。",
-    canvas_download_nodes: "触发浏览器下载当前画布的图片、视频、音频或 3D 节点原始文件。nodeIds 省略时使用当前选区；多图节点只下载当前主图。返回文件名及已触发状态，不代表文件已落盘，也不返回本地路径；浏览器可能要求允许多文件下载。",
+    canvas_download_nodes: "把当前画布的图片、视频、音频或 3D 节点原始文件直接保存到本机用户「下载」目录（同名自动加序号），无需人工操作文件管理器。nodeIds 省略时使用当前选区；多图节点只下载当前主图。status=saved 时每项返回本地绝对路径 path；读不到文件内容（如跨域链接）的节点会退回浏览器下载，此时没有 path，status=download_triggered。",
     canvas_import_to_blender: "将当前画布的 3D 节点导入本机 Blender，支持展开分组。nodeIds 省略时使用当前选区。需要本机 Blender 已开启画布 WebSocket 桥接（60600），不是 Blender MCP（9876）。立即返回已启动状态，不代表导入完成；最终成功或失败由网页提示与事件日志报告，不要据此重复导入。",
     director_desk_command: "操作画布上的 3D 导演台节点（需要时自动打开）。nodeId 省略时使用已打开或唯一的导演台。先用 action=get_scene 读取对象、机位、可选体型/姿势/几何体/画幅以及 canvasAssets（画布上的模型和图片）。其他 action：add_character(bodyType?, pose?)、add_geometry(geometry)、add_canvas_asset(sourceNodeId，模型进场景、图片设为全景)、set_transform(id, position?/rotation?/scale? 均为 [x,y,z]，旋转单位为弧度)、set_pose(id, pose)、delete_objects(ids)、add_camera(position?, target?, fov?)、set_aspect_ratio(aspectRatio)、capture(cameraId?, preset=current/four/twelve, sendToCanvas 默认 true，截图会作为图片节点回到画布)。坐标单位为米，y 轴向上。",
     canvas_get_state: "读取当前网页画布的节点、连线、选区和视口。",

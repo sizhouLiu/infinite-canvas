@@ -15,7 +15,7 @@ description: 操作 Infinite Canvas 当前网页画布，读取节点、选区�
 - 创建生成内容优先用 `canvas_generate_text`、`canvas_generate_image`、`canvas_generate_video`、`canvas_generate_audio`、`canvas_generate_model3d`。
 - 用户要求生成 3D / 模型时用 `canvas_generate_model3d`，不要改走生图。仅有提示词走文生 3D；已有图片节点时把 ID 放入 `referenceNodeIds`（1 张图生 3D，2–4 张多视图生 3D）。需要贴图、PBR、面数、四边面时通过 `model3dTexture`、`model3dPbr`、`model3dTextureQuality`、`model3dFaceLimit`、`model3dQuad` 传入，未指定则沿用画布当前 3D 设置。
 - 需要把提示词、配置和生成节点串成流程时，使用 `canvas_create_generation_flow`（`mode` 可为 text / image / video / audio / model3d）或项目已有的流程工具。
-- 创建空 3D 占位节点用 `canvas_create_node`，`nodeType` 为 `model3d`。已有模型可用 `canvas_import_to_blender` 导入 Blender；用 `canvas_download_nodes` 下载画布媒体。两个工具均可传 `nodeIds`，省略则使用当前选区；返回“已启动/已触发”不代表导入完成或文件已落盘。打开 Bambu Studio 仍是画布 UI 操作。
+- 创建空 3D 占位节点用 `canvas_create_node`，`nodeType` 为 `model3d`。已有模型可用 `canvas_import_to_blender` 导入 Blender；用 `canvas_download_nodes` 下载画布媒体。两个工具均可传 `nodeIds`，省略则使用当前选区；下载直接保存到本机「下载」目录并返回本地路径，Blender 返回“已启动”不代表导入完成。打开 Bambu Studio 仍是画布 UI 操作。
 - 需要批量增删改、移动、连接节点或设置视口时，使用 `canvas_apply_ops`。
 - 需要在 3D 导演台里摆放角色、道具、机位或出镜头截图时，使用 `director_desk_command`：先 `action: "get_scene"` 读取场景和可选项，再调用 add_character / add_canvas_asset / set_transform / set_pose / add_camera / capture 等。截图默认作为图片节点回到画布。
 - 需要把多个节点归为一组时，使用 `canvas_group_nodes`（至少两个节点，可传 `title`）；解散用 `canvas_ungroup_nodes`，传组 ID 解散整组，传成员 ID 只移出该成员。
