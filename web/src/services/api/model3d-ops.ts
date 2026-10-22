@@ -165,13 +165,25 @@ export async function resolveOpInput(config: AiConfig, source: { taskId?: string
     return uploadTripoFile(requestConfig, new File([blob], `model.${source.mimeType?.includes("fbx") ? "fbx" : "glb"}`, { type: source.mimeType || "model/gltf-binary" }), options);
 }
 
-export function requestModel3dTexture(config: AiConfig, input: string, params: { model?: string; textureQuality?: string; pbr?: boolean; textureAlignment?: string }, options?: Model3dOpOptions) {
+/**
+ * Retexture a model. Reference images come from images wired into the 3D node: one image is sent as
+ * texture_prompt.image, two to four as texture_prompt.images keyed by view (front required, like multiview).
+ */
+export function requestModel3dTexture(
+    config: AiConfig,
+    input: string,
+    params: { model?: string; textureQuality?: string; pbr?: boolean; textureAlignment?: string; image?: string; views?: Array<{ view: MultiviewView; input: string }> },
+    options?: Model3dOpOptions,
+) {
+    if (params.views?.length && !params.views.some((item) => item.view === "front")) throw new Error(apiText("model3dMultiviewFrontRequired"));
+    const texturePrompt = params.views?.length ? { images: params.views.map((item) => ({ [item.view]: item.input })) } : params.image ? { image: params.image } : null;
     return runModelOp(
         config,
         "/models/texture",
         {
             input,
             model: params.model || TEXTURE_MODELS[0],
+            ...(texturePrompt ? { texture_prompt: texturePrompt } : {}),
             ...(params.textureQuality ? { texture_quality: params.textureQuality } : {}),
             ...(params.pbr === undefined ? {} : { pbr: params.pbr }),
             ...(params.textureAlignment ? { texture_alignment: params.textureAlignment } : {}),
