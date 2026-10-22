@@ -67,7 +67,7 @@ import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/can
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
-import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
+import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, flattenGenerationInputs, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasSelectionToolbar } from "@/components/canvas/canvas-selection-toolbar";
 import { InfiniteCanvas } from "@/components/canvas/infinite-canvas";
@@ -814,8 +814,23 @@ function InfiniteCanvasPage() {
                     result = await requestModel3dComplete(generationConfig, String(sourceNode.metadata?.model3dSourceTaskId), { completionMode: String(params.completionMode) }, options);
                 } else {
                     const input = await resolveOpInput(generationConfig, source, { signal: controller.signal });
-                    if (op === "texture") result = await requestModel3dTexture(generationConfig, input, { model: String(params.model), textureQuality: String(params.textureQuality), pbr: Boolean(params.pbr) }, options);
-                    else if (op === "convert") result = await requestModel3dConvert(generationConfig, input, { format: String(params.format), quad: Boolean(params.quad), faceLimit }, options);
+                    if (op === "texture") {
+                        // Images wired into the 3D node guide the new texture; with none it retextures from the model alone.
+                        const references = (await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, ""))).referenceImages.slice(0, MULTIVIEW_VIEWS.length);
+                        const tokens = await Promise.all(references.map((image) => uploadModel3dImage(generationConfig, dataUrlToFile(image), { signal: controller.signal })));
+                        const assigned = tokens.length > 1 ? assignMultiviewViews(references, nodesWithSocketViews(nodesRef.current, connectionsRef.current, sourceNode.id)) : [];
+                        result = await requestModel3dTexture(
+                            generationConfig,
+                            input,
+                            {
+                                model: String(params.model),
+                                textureQuality: String(params.textureQuality),
+                                pbr: Boolean(params.pbr),
+                                ...(tokens.length === 1 ? { image: tokens[0] } : tokens.length > 1 ? { views: tokens.map((token, index) => ({ view: assigned[index], input: token })) } : {}),
+                            },
+                            options,
+                        );
+                    } else if (op === "convert") result = await requestModel3dConvert(generationConfig, input, { format: String(params.format), quad: Boolean(params.quad), faceLimit }, options);
                     else if (op === "rig") result = await requestModel3dRig(generationConfig, input, { model: String(params.model), rigType: String(params.rigType), spec: String(params.spec), outFormat: String(params.outFormat) }, options);
                     else if (op === "segment") result = await requestModel3dSegment(generationConfig, input, { model: String(params.model), granularity: String(params.granularity), splitByConnectivity: Boolean(params.splitByConnectivity) }, options);
                     else if (op === "uv") result = await requestModel3dUv(generationConfig, input, { bake: Boolean(params.bake) }, options);
@@ -4827,6 +4842,7 @@ function InfiniteCanvasPage() {
                 <CanvasModel3dOpDialog
                     op={model3dOpTarget?.op || null}
                     node={model3dOpNode}
+                    referenceImageCount={model3dOpNode ? flattenGenerationInputs(buildNodeGenerationInputs(model3dOpNode.id, nodes, connections)).filter((input) => input.image).length : 0}
                     onCancel={() => setModel3dOpTarget(null)}
                     onConfirm={(op, params) => {
                         setModel3dOpTarget(null);

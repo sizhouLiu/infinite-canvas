@@ -7,6 +7,8 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- 重新贴图参考图：对已有模型的 3D 节点连入 1 张图片，打开「3D 操作 - 重新贴图」，弹窗应提示将使用该图作参考，结果节点的贴图应接近参考图；连入 2–4 张图（含一张接到正面接点）应走多视角贴图，缺正面时给出明确报错；不连图时与原来一致。失败后重试应仍带上参考图。请求体按文档使用 `texture_prompt.image` / `texture_prompt.images`（file_token），文档未给出 `image` 的示例写法，需以真实请求确认 Tripo 接受裸 token。
+
 - Multi-selection align and distribute: after box-selecting or Shift-clicking several nodes, the toolbar should show align and distribute buttons (distribute needs at least 3). Aligning should line up edges or centers, distributing should make neighbour gaps equal, and a selected group should move with its members. Duplicate should copy every selected node and delete should remove them all. Arrow keys nudge 1px, Shift+arrow 10px, and both can be undone.
 
 - Agent drives the director desk: with one director desk node on the canvas, `director_desk_command` with `action: "get_scene"` should open the desk if it is closed and return the scene, body type and pose options, and canvas assets. Then check add_character (with pose), add_canvas_asset (model into the scene, image as panorama), set_transform, set_pose, delete_objects, add_camera, set_aspect_ratio and capture; after capture the shots should appear as image nodes on the canvas. With several desks and no nodeId the tool should ask for one. In manual-confirm mode the tool should ask before running.
