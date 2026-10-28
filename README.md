@@ -5,8 +5,8 @@
 <h1 align="center">无限画布 (infinite-canvas)</h1>
 
 <p align="center">
-  <a href="https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/github/stars/basketikun/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
-  <a href="https://github.com/basketikun/infinite-canvas/tags"><img src="https://img.shields.io/github/v/tag/basketikun/infinite-canvas?style=flat-square&label=version" alt="Version"></a>
+  <a href="https://github.com/sizhouLiu/infinite-canvas"><img src="https://img.shields.io/github/stars/sizhouLiu/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
+  <a href="https://github.com/sizhouLiu/infinite-canvas/tags"><img src="https://img.shields.io/github/v/tag/sizhouLiu/infinite-canvas?style=flat-square&label=version" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f97316?style=flat-square" alt="License"></a>
   <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white" alt="Vite"></a>
   <a href="https://reactrouter.com/"><img src="https://img.shields.io/badge/React_Router-7-ca4245?style=flat-square&logo=reactrouter&logoColor=white" alt="React Router"></a>
@@ -28,6 +28,7 @@
 - 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
 - AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成。
 - 3D 生成：接入 Tripo，支持文生 3D、图生 3D、多视图生 3D，节点内可拖拽旋转查看模型，并提供一整套 3D 后处理操作。
+- 3D 导演台：画布内的导演台节点，连入 3D 模型和图片后在 3D 场景里摆放角色、道具和机位，截图回传为图片节点。
 - 本机 3D 软件联动：已生成的模型可直接导入本机 Blender，或唤起 Bambu Studio 打开 3MF。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
@@ -109,10 +110,11 @@ uvx mcp-for-blender setup
 ### 本地开发
 
 ```bash
-git clone git@github.com:basketikun/infinite-canvas.git
+git clone git@github.com:sizhouLiu/infinite-canvas.git
 cd infinite-canvas
 cd web && bun install && cd ..
-node scripts/dev.mjs          # 一键启动前端 :3000 + 转发代理 :23210
+cd director-desk && npm install && cd ..
+node scripts/dev.mjs          # 一键启动前端 :3000 + 转发代理 :23210 + 导演台 :5174
 node scripts/dev.mjs --agent  # 同时启动本地 Canvas Agent
 ```
 
@@ -121,7 +123,7 @@ node scripts/dev.mjs --agent  # 同时启动本地 Canvas Agent
 ### Docker 运行
 
 ```bash
-git clone git@github.com:basketikun/infinite-canvas.git
+git clone git@github.com:sizhouLiu/infinite-canvas.git
 cd infinite-canvas
 docker compose up -d
 ```
