@@ -5,6 +5,10 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 壁纸预览节点：构建 `plugins/canvas/wallpaper-preview` 后在「节点插件」启用本地插件，新建「壁纸预览」节点。在壁纸项目运行 `npm run preview` 后应显示 `http://localhost:4173/` 页面，点击灯、显示器等应能触发页面交互；拖动顶部控制条空白处可移动节点；切换机位应在地址上加 `?camera=`，刷新按钮重新加载；预览未启动时应提示运行 `npm run preview`。连入含 http 地址的文本节点时应改用该地址。已在无头 Chrome 中对真实壁纸页（vite preview 4173）验证：场景开始渲染、点击显示器后屏幕变黑且再点恢复、切到卧室机位后 iframe 地址带 `?camera=CAM_Bedroom` 且画面切换、拖动控制条后节点移动且页面继续渲染；浅色主题和真实 GPU 环境未验证。
+
+- `wallpaper-pipeline` Skill：让 Agent「构建壁纸」，应在壁纸项目运行 `npm run pipeline -- --skip-export --check`，读取 `work/pipeline/report.json`，失败时按步骤名汇报；成功时在画布写结果摘要和预览地址文本节点并连到壁纸预览节点，截图只列路径，最后给出 Wallpaper Engine 手动导入步骤。依赖壁纸项目的一键构建命令；该命令已在壁纸项目端到端跑通（完整导出与 `--skip-export` 两种），Agent 按本 Skill 驱动构建并写回画布尚未实测。
+
 - Agent 下载直接落盘：重启 Canvas Agent 后，让 Agent 用 `canvas_download_nodes` 下载画布上的图片 / 视频 / 3D 节点，不应弹出浏览器保存框，文件应直接出现在 `~/Downloads`，返回结果里带本地路径；同名文件应自动加 `(1)` 序号而不是覆盖。
 
 - 多选对齐与分布：框选或 Shift 点选多个节点后，工具栏应出现对齐和等距分布按钮（分布需至少 3 个）；对齐后节点边缘或中心一致，等距分布后相邻间隙相等，选中的组带着成员一起移动。复制一份应创建全部选中节点的副本，删除应移除全部选中节点。方向键微移 1px，Shift+方向键微移 10px，都可撤销。
