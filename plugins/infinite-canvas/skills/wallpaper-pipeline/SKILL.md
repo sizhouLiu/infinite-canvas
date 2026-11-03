@@ -44,10 +44,10 @@ npm run pipeline -- --skip-export --check
 1. 用 `canvas_create_text_node` 写一个结果摘要节点，标题「壁纸构建结果」，内容包含：成功/失败（失败时附 `error`）、各步骤名与耗时（跳过的步骤标「已跳过」）、`wallpaper` 目录、`zip` 路径、截图路径列表。
 2. 截图：当前画布工具没有“从本机路径创建图片节点”的操作（`canvas_create_attachment_nodes` 只接受对话附件，`add_node` 的 `metadata.content` 写本机路径浏览器无法读取）。因此不要创建空图片节点或写本机路径当图片地址；只在摘要里列出截图路径，并告诉用户可以把这些 PNG 拖进画布。
 3. 预览：
-   - 先检查 `http://localhost:4173/` 是否可访问；不可访问时在项目根目录后台启动 `npm run preview`（会一直运行，不要等待它退出），再确认可以访问。
-   - 用 `canvas_create_text_node` 创建一个内容为 `http://localhost:4173/` 的文本节点，标题「壁纸预览地址」，并用 `canvas_connect_nodes` 连到已有的「壁纸预览」节点（`type` 为 `wallpaper-preview:viewer`）；预览节点会优先使用上游文本里的地址。
-   - 画布上没有「壁纸预览」节点时，请用户从创建菜单添加一个并连上该文本节点。当前 `canvas_apply_ops` 的 `add_node` 只支持内置节点类型，Agent 不能直接创建插件节点。
-   - 预览节点里可以切换机位（正面 / 书桌 / 卧室 / 书架），也可直接在地址后加参数，例如 `?camera=CAM_Front&anime=0&parallax=0&fps=30`。
+   - 预览服务：`npm run preview`（`node pipeline/serve.mjs`，端口 4173）。一个服务提供项目里所有已构建的壁纸：`http://localhost:4173/wallpapers.json` 列出 `[{ id, title, path, cameras }]`，壁纸页在 `http://localhost:4173/w/<id>/`。
+   - 先检查 `http://localhost:4173/wallpapers.json` 是否可访问；不可访问时在项目根目录后台启动 `npm run preview`（会一直运行，不要等待它退出），再确认可以访问，并确认本次构建的壁纸 id（配置里的 `name`）在列表里。
+   - 「壁纸预览」节点（`type` 为 `wallpaper-preview:viewer`）用下拉框选择壁纸和机位，不需要填地址。要让它显示本次构建的壁纸：用 `canvas_create_text_node` 创建一个内容为壁纸 id 的文本节点（标题「壁纸」），用 `canvas_connect_nodes` 连到该节点，预览节点会选中这个壁纸。
+   - 画布上没有「壁纸预览」节点时，请用户从创建菜单添加一个，再在它的「壁纸」下拉框里选中本次构建的壁纸（或连上上面的文本节点）。当前 `canvas_apply_ops` 的 `add_node` 只支持内置节点类型，Agent 不能直接创建插件节点。
 
 ## 4. 告诉用户如何导入 Wallpaper Engine
 
