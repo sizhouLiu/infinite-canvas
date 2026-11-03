@@ -150,6 +150,16 @@ docker compose up -d
   </tr>
 </table>
 
+### 交互式动态壁纸
+
+[girl-desk-wallpaper](https://github.com/sizhouLiu/girl-desk-wallpaper)：用画布生成 Tripo 3D 素材，在 Blender 组装场景，再一条命令打包成 Wallpaper Engine 三渲二交互壁纸，可在画布「壁纸预览」节点里直接预览。
+
+![交互式动态壁纸演示](https://raw.githubusercontent.com/sizhouLiu/girl-desk-wallpaper/main/docs/media/demo.gif)
+
+写实风格示例：复刻 WLOP《天南阁》原画，从画布拆分原画、生成 3D 模型，到 Blender 组装、打光，最后输出带雾气、云海、飘雪、人物衣裙与头发随风摆动、点击冰龙吐息的网页壁纸。
+
+![天南阁写实动态壁纸演示](assets/showcase/tiannange-wallpaper.gif)
+
 ## 原项目与开源协议
 
 本项目源自 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)。
