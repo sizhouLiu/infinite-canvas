@@ -175,3 +175,28 @@ The Chinese version contains the complete item-by-item acceptance checklist.
 - 所有 4K 预设提交时均不应触发本地总像素或最长边限制；生成和编辑请求、调用脚本应收到所选像素尺寸。
 - 分辨率为自动时保留比例选择，比例为自动时禁用 W/H；手动输入 W/H 后，对齐开关仍应按原有方式工作。
 - Gemini 在质量为自动时，应将表中尺寸识别为对应的 1K / 2K / 4K；显式选择质量时维持原有优先级。视频尺寸设置应保持原有行为。
+
+## Agent creates canvas nodes from local files
+
+`canvas_create_local_file_nodes` turns local absolute paths into real canvas nodes. Node type comes from the extension: image (avif/gif/jpg/jpeg/png/webp), video (mp4/webm/mov), audio (mp3/wav/m4a/ogg/flac), 3D (glb/fbx). The agent validates the path and extension, the page reads the bytes back through `/agent/local-file` and stores them in local storage, so the node holds a real asset rather than a path.
+
+Pending verification:
+
+- Create nodes for all four kinds and confirm each renders, plays or opens in the 3D viewer, and still works after a page refresh (the asset must come from local storage, not the original path).
+- Image and video nodes should keep their original aspect ratio; audio and 3D use default node sizes.
+- Pass `titles` and confirm node titles follow it; omit it and titles fall back to file names.
+- A relative path, a missing file, or an unsupported extension (such as `.obj` or `.txt`) should fail with a readable message and create no node.
+- Pass the returned node IDs as `referenceNodeIds` to a generation flow and confirm the images are actually used as references.
+- The agent panel event log should label the call and show it as a canvas write operation.
+
+## Tripo 7-day asset retention
+
+Tripo now keeps a task's models and images for 7 days. Generated files were already downloaded locally the moment a task succeeded, so what changed is everything that handed an old task id back to Tripo. Follow-up operations now always upload the stored model; only the two operations that cannot (animation, mesh completion) still check the 7-day window, via `isTripoTaskLive` in `tripo-shared.ts`.
+
+Pending verification:
+
+- Run retexture, convert, decimate, segment, UV and the rig check on a freshly generated model, on an older node, on an imported local file, and on a part rebuilt locally after a split. All four origins should behave identically, each uploading the stored model once.
+- Retexture with reference images wired into the 3D node should still send them (one image, or two to four keyed by view socket).
+- Rig a model, then apply an animation: it should work right after rigging. With `model3dSourceTaskAt` edited to over 7 days ago in local storage, it should stop with the "rig again" message, spend no credits, and leave the node unchanged. Same for segment then mesh completion.
+- Open a converted 3MF in Bambu Studio: a fresh conversion should use the signed URL directly; with the timestamp aged past 7 days it must fall back to the locally stored file and still open (this path needs Canvas Agent connected).
+- Confirm no node loses its model, preview or texture after the retention window — the files come from local storage, not Tripo.

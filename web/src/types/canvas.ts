@@ -96,9 +96,15 @@ export type CanvasNodeMetadata = {
     model3dTextureQuality?: string;
     model3dFaceLimit?: string;
     model3dQuad?: string;
-    // Tripo task that produced this model. Kept so follow-up operations can chain server-side instead of
-    // re-uploading the glb; model3dTaskId is cleared on success, so the id is stored separately here.
+    // Tripo task that produced this model, kept for the two /v3 operations whose `input` accepts only a task
+    // id and rejects a file_token: retarget needs the rig task, mesh completion needs the segment task. The
+    // glb itself does carry the skeleton — this is an API restriction, not a format one — so these could run
+    // from the stored file if the endpoint allowed it. Every other operation uploads the stored file.
+    // model3dTaskId is cleared on success, so the id is stored separately here.
     model3dSourceTaskId?: string;
+    // When model3dSourceTaskId was created, as an ISO timestamp. Tripo keeps a task's assets for 7 days, after
+    // which the id resolves to nothing; an absent timestamp counts as expired.
+    model3dSourceTaskAt?: string;
     model3dTaskKind?: Model3dTaskKind;
     // Follow-up operation metadata is saved before the request starts so a failed node can retry the same operation.
     model3dOpKind?: string;

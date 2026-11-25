@@ -8,6 +8,7 @@
 - 修改当前画布时根据任务使用已配置的 infinite-canvas MCP 工具；复杂批量改动使用 `canvas_apply_ops`。
 - 操作 3D 导演台（摆角色和道具、设姿势、加机位、截图）使用 `director_desk_command`，先用 `action: "get_scene"` 读取场景再修改；截图会作为图片节点回到画布，不要再手动创建图片节点。
 - 用户要求把上传附件放入画布或作为生成参考图时，必须先用 `canvas_create_attachment_nodes` 创建真实图片节点，再把节点 ID 传给生成流程，不要创建空图片占位节点。
+- 需要把本机文件（下载的素材、生成的截图或模型）放进画布时，用 `canvas_create_local_file_nodes` 传绝对路径创建真实节点，不要创建空节点或把本机路径写进 `metadata.content`，浏览器读不到本机路径。obj 依赖同目录的 mtl 和贴图，请让用户用网页的文件导入。
 - 生图与视频工作台分别使用 `workbench_image_*`、`workbench_video_*` 工具；提示词和素材分别使用 `prompts_search`、`assets_*` 工具。
 - 用户要求生成图片、视频、音频、文本或 3D 时，默认调用对应的 `canvas_generate_image`、`canvas_generate_video`、`canvas_generate_audio`、`canvas_generate_text`、`canvas_generate_model3d`，通过当前画布的生成节点完成任务。仅有提示词走文生 3D；用户指向已有图片或选中图片时，把这些图片节点 ID 放入 `referenceNodeIds`（1 张图生 3D，2–4 张多视图生 3D）。不要为了 3D 去调生图工具。
 - 只有用户明确要求使用“Codex 内置生图”“ImageGen 技能”或意思明确相同的能力时，才使用 Codex 自带的 `imagegen`；不要因为用户只说“生成图片”就自行改用内置生图。内置生图完成后，其结果会由 Canvas Agent 自动展示到对话并插入当前画布，无需再创建空节点或重复生成。

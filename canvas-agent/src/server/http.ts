@@ -12,6 +12,7 @@ import { archiveCodexThread, CodexSkillLookupError, configureCodexSkill, generat
 import type { CodexReasoningEffort, CodexSkillSelector } from "../agent/codex-protocol.js";
 import { messageMetadataStore } from "../agent/message-metadata.js";
 import type { AgentAttachment, AgentPermissionMode } from "../agent/types.js";
+import { localFileKind, localFileMimeType } from "../canvas/local-files.js";
 import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
 import { DEFAULT_PORT, ensureSiteWorkspace, loadConfig, saveConfig, updateSiteWorkspace, type CanvasAgentConfig } from "../config.js";
 import { logger } from "../utils/logger.js";
@@ -205,6 +206,15 @@ export function startHttpServer() {
         if (!file.isFile()) return res.status(400).json({ ok: false, error: "图片文件无效" });
         res.setHeader("Cache-Control", "no-store");
         res.type(path.extname(filePath)).send(await readFile(filePath));
+    }));
+    /** 读取本机媒体文件内容，供网页把 canvas_create_local_file_nodes 的节点填成真实素材。 */
+    app.post("/agent/local-file", route(async (req, res) => {
+        const filePath = String(req.body?.path || "");
+        if (!path.isAbsolute(filePath) || !localFileKind(filePath)) return res.status(400).json({ ok: false, error: "文件路径无效" });
+        const file = await stat(filePath);
+        if (!file.isFile()) return res.status(400).json({ ok: false, error: "文件无效" });
+        res.setHeader("Cache-Control", "no-store");
+        res.type(localFileMimeType(filePath)).send(await readFile(filePath));
     }));
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
     app.get("/agent/codex/workspace", (_req, res) => {

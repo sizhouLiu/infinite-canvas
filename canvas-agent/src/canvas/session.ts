@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
+import { stat } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
+import path from "node:path";
 
 import type { AgentAttachment } from "../agent/types.js";
 import { logger } from "../utils/logger.js";
+import { LOCAL_FILE_EXTENSIONS, localFileKind, localFileMimeType, type LocalFileKind } from "./local-files.js";
 import { buildCanvasToolRequest, fitAttachmentNodeSize } from "./operations.js";
 import type { ToolName } from "./schemas.js";
 import { compactCanvasState, compactNode, isToolName, nextCanvasX, parseToolInput } from "./tools.js";
@@ -23,7 +26,15 @@ export type ConversationState = {
     error?: string;
 };
 type McpInventoryItem = { name: string; authStatus?: string };
-export const AGENT_PROTOCOL_VERSION = 6;
+export const AGENT_PROTOCOL_VERSION = 7;
+
+/** 本机文件节点的初始尺寸，与网页 NODE_DEFAULT_SIZE 保持一致；图片和视频由网页按原始比例修正。 */
+const LOCAL_FILE_NODE_SIZE: Record<LocalFileKind, { width: number; height: number }> = {
+    image: { width: 340, height: 240 },
+    video: { width: 420, height: 236 },
+    audio: { width: 340, height: 120 },
+    model3d: { width: 360, height: 360 },
+};
 
 const SITE_TOOLS = new Set<ToolName>([
     "site_navigate",
@@ -456,6 +467,7 @@ export class CanvasSession {
             return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
         }
         if (name === "canvas_create_attachment_nodes") return await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
+        if (name === "canvas_create_local_file_nodes") return await this.createLocalFileNodes(input as { paths: string[]; titles?: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
         if (!this.clients.size) throw new Error("当前没有已连接画布");
         const request = buildCanvasToolRequest(name, input, this.canvasState);
         return await this.requestCanvasTool(request.name, request.input);
@@ -486,6 +498,33 @@ export class CanvasSession {
         });
         await this.requestCanvasTool("canvas_create_attachment_nodes", { nodes });
         return { nodes: nodes.map(({ id, attachmentId, title }) => ({ id, attachmentId, title })) };
+    }
+
+    /** 将本机文件转换为画布节点，文件内容由网页回读 /agent/local-file。 */
+    private async createLocalFileNodes(input: { paths: string[]; titles?: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" }) {
+        if (!this.clients.has(this.targetClientId)) throw new Error("当前没有已连接画布");
+        const files = await Promise.all(input.paths.map(async (filePath, index) => {
+            if (!path.isAbsolute(filePath)) throw new Error(`文件路径必须是绝对路径：${filePath}`);
+            const kind = localFileKind(filePath);
+            if (!kind) throw new Error(`不支持的文件类型：${filePath}，支持 ${LOCAL_FILE_EXTENSIONS.join("、")}`);
+            const file = await stat(filePath).catch(() => null);
+            if (!file?.isFile()) throw new Error(`找不到文件：${filePath}`);
+            return { path: filePath, kind, mimeType: localFileMimeType(filePath), title: input.titles?.[index]?.trim() || path.basename(filePath) };
+        }));
+        const x = Number(input.x ?? nextCanvasX(this.canvasState));
+        const y = Number(input.y ?? 0);
+        const gap = Number(input.gap ?? 40);
+        const direction = input.direction || "row";
+        let offset = 0;
+        const nodes = files.map((file) => {
+            // 图片和视频的真实尺寸只有网页解码后才知道，这里按默认节点尺寸排布，网页再按原始比例修正。
+            const size = LOCAL_FILE_NODE_SIZE[file.kind];
+            const node = { id: `${file.kind}-${crypto.randomUUID()}`, ...file, position: { x: direction === "row" ? x + offset : x, y: direction === "column" ? y + offset : y }, width: size.width, height: size.height };
+            offset += (direction === "row" ? size.width : size.height) + gap;
+            return node;
+        });
+        await this.requestCanvasTool("canvas_create_local_file_nodes", { nodes });
+        return { nodes: nodes.map(({ id, kind, title, path: filePath }) => ({ id, kind, title, path: filePath })) };
     }
 
     /** 向目标网页发送工具请求并等待调用结果。 */

@@ -9,12 +9,14 @@ import i18n from "@/i18n";
 import { readAgentUrlBootstrap } from "@/lib/agent/agent-url-bootstrap";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
-import { imageMetadata } from "@/lib/canvas/canvas-node-factory";
+import { audioMetadata, imageMetadata, model3dMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { resolveCanvasReferenceImages } from "@/lib/canvas/canvas-resource-references";
 import { readImageMeta } from "@/lib/image-utils";
 import { randomId } from "@/lib/utils";
+import { uploadMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
+import { CanvasNodeType } from "@/types/canvas";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAgentSkillStore } from "@/stores/use-agent-skill-store";
 import { useShallow } from "zustand/react/shallow";
@@ -852,6 +854,12 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 appliedOps = await attachmentNodeOps(endpoint, token, clientIdRef.current, payload.input?.nodes);
                 result = context.applyOps(appliedOps);
                 await postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
+            } else if (payload.name === "canvas_create_local_file_nodes") {
+                const context = canvasContextRef.current;
+                if (!context) throw new Error(rt("openCanvasFirst"));
+                appliedOps = await localFileNodeOps(endpoint, token, payload.input?.nodes);
+                result = context.applyOps(appliedOps);
+                await postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
             } else {
                 const snapshot = canvasContextRef.current?.snapshot;
                 if (!snapshot) throw new Error(rt("openCanvasFirst"));
@@ -1558,6 +1566,38 @@ async function attachmentNodeOps(endpoint: string, token: string, clientId: stri
                 height: size.height,
                 metadata: imageMetadata(image),
             };
+        }),
+    );
+}
+
+type LocalFileNode = { id: string; kind: "image" | "video" | "audio" | "model3d"; path: string; title: string; mimeType: string; position: { x: number; y: number }; width: number; height: number };
+
+/** 把 Agent 指定的本机文件读回来存入本地存储，并建成对应类型的画布节点。 */
+async function localFileNodeOps(endpoint: string, token: string, value: unknown): Promise<CanvasAgentOp[]> {
+    const nodes = (Array.isArray(value) ? value : []) as LocalFileNode[];
+    if (!nodes.length) throw new Error(rt("noLocalFiles"));
+    return await Promise.all(
+        nodes.map(async (node) => {
+            const response = await fetch(`${endpoint}/agent/local-file?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: node.path }) });
+            if (!response.ok) {
+                const body = (await response.json().catch(() => null)) as { error?: string } | null;
+                throw new Error(body?.error || rt("localFileReadFailed"));
+            }
+            // 浏览器对 glb、fbx 报不出类型，用 Agent 按扩展名判定的 MIME 重建 Blob。
+            const blob = new Blob([await response.arrayBuffer()], { type: node.mimeType });
+            const base = { type: "add_node" as const, id: node.id, title: node.title, position: node.position };
+            if (node.kind === "image") {
+                const image = await uploadImage(blob);
+                const size = fitNodeSize(image.width, image.height);
+                return { ...base, nodeType: CanvasNodeType.Image, width: size.width, height: size.height, metadata: imageMetadata(image) };
+            }
+            const file = await uploadMediaFile(blob, node.kind);
+            if (node.kind === "video") {
+                const size = file.width && file.height ? fitNodeSize(file.width, file.height) : { width: node.width, height: node.height };
+                return { ...base, nodeType: CanvasNodeType.Video, width: size.width, height: size.height, metadata: videoMetadata(file) };
+            }
+            if (node.kind === "audio") return { ...base, nodeType: CanvasNodeType.Audio, width: node.width, height: node.height, metadata: audioMetadata(file) };
+            return { ...base, nodeType: CanvasNodeType.Model3d, width: node.width, height: node.height, metadata: model3dMetadata(file) };
         }),
     );
 }

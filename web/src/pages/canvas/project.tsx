@@ -29,6 +29,7 @@ import {
     resolveOpInput,
     storeModel3dOpResult,
 } from "@/services/api/model3d-ops";
+import { isTripoTaskLive } from "@/services/api/tripo-shared";
 import { collectBlenderImportNodes, importModelsToBlender } from "@/services/api/blender-bridge";
 import { collectBambuImportNodes, openModelsInBambuStudio } from "@/services/api/bambu-studio";
 import { saveAs } from "file-saver";
@@ -740,8 +741,6 @@ function InfiniteCanvasPage() {
                     position: { x: startX, y: sourceNode.position.y + index * (height + gap) },
                     width,
                     height,
-                    // No model3dSourceTaskId: a locally split part has no Tripo task of its own, so a
-                    // follow-up operation uploads its file instead of chaining off a task id.
                     metadata: { ...model3dMetadata(partFile), prompt: part.name },
                 } satisfies CanvasNodeData;
             }),
@@ -788,7 +787,7 @@ function InfiniteCanvasPage() {
             const history = trackGeneration({ nodeId: targetId, kind: "model3dOp", title: model3dOpLabel(op), model: generationConfig.model, op });
             setRunningNodeId(targetId);
             try {
-                const source = { taskId: sourceNode.metadata?.model3dSourceTaskId, storageKey: sourceNode.metadata?.storageKey, mimeType: sourceNode.metadata?.mimeType };
+                const source = { storageKey: sourceNode.metadata?.storageKey, mimeType: sourceNode.metadata?.mimeType };
                 // Rigging is billed, so the free rig-check runs first and stops a model Tripo cannot rig.
                 if (op === "rig" && !existingTaskId) {
                     const input = await resolveOpInput(generationConfig, source, { signal: controller.signal });
@@ -807,11 +806,14 @@ function InfiniteCanvasPage() {
 
                 if (existingTaskId) {
                     result = await waitForModel3dOp(generationConfig, existingTaskId, options);
-                } else if (op === "retarget") {
-                    // Tripo only accepts the rig task id here; the menu blocks this op when the node has none.
-                    result = await requestModel3dRetarget(generationConfig, String(sourceNode.metadata?.model3dSourceTaskId), { animation: String(params.animation), outFormat: String(params.outFormat), animateInPlace: Boolean(params.animateInPlace) }, options);
-                } else if (op === "complete") {
-                    result = await requestModel3dComplete(generationConfig, String(sourceNode.metadata?.model3dSourceTaskId), { completionMode: String(params.completionMode) }, options);
+                } else if (op === "retarget" || op === "complete") {
+                    // These two /v3 endpoints take only the upstream rig / segment task id and reject a
+                    // file_token, so there is no local fallback to offer. Once that task's assets are gone the
+                    // request can only fail, so it is stopped here rather than billed.
+                    if (!isTripoTaskLive(sourceNode.metadata?.model3dSourceTaskAt)) throw new Error(t(`canvas.model3dOps.taskExpired.${op}`));
+                    result = op === "retarget"
+                        ? await requestModel3dRetarget(generationConfig, String(sourceNode.metadata?.model3dSourceTaskId), { animation: String(params.animation), outFormat: String(params.outFormat), animateInPlace: Boolean(params.animateInPlace) }, options)
+                        : await requestModel3dComplete(generationConfig, String(sourceNode.metadata?.model3dSourceTaskId), { completionMode: String(params.completionMode) }, options);
                 } else {
                     const input = await resolveOpInput(generationConfig, source, { signal: controller.signal });
                     if (op === "texture") {
@@ -874,8 +876,10 @@ function InfiniteCanvasPage() {
                                       ...node.metadata,
                                       ...model3dMetadata(stored, preview),
                                       model: generationConfig.model,
-                                      // Recorded so the next operation in a chain can reuse this task server-side.
+                                      // Recorded for retarget and mesh completion, the only operations that
+                                      // chain off a task id; the timestamp bounds it to Tripo's 7-day retention.
                                       model3dSourceTaskId: result.taskId,
+                                      model3dSourceTaskAt: new Date().toISOString(),
                                       model3dTaskKind: op,
                                       // Decimate can re-emit quads, so the result node records its own topology
                                       // rather than inheriting the source node's.
@@ -2225,7 +2229,6 @@ function InfiniteCanvasPage() {
                             position: { x: position.x - spec.width / 2 + offset, y: position.y - spec.height / 2 + offset },
                             width: spec.width,
                             height: spec.height,
-                            // No model3dSourceTaskId: an imported file has no Tripo task, so follow-ups upload it.
                             metadata: model3dMetadata(stored),
                         },
                     ]);
@@ -2699,7 +2702,6 @@ function InfiniteCanvasPage() {
                     position: { x: sourceNode.position.x + (sourceNode.width || spec.width) + 96, y: sourceNode.position.y + (sourceNode.height || spec.height) + 48 },
                     width: spec.width,
                     height: spec.height,
-                    // No model3dSourceTaskId: this glb was rebuilt locally, so Tripo follow-ups upload the file instead.
                     metadata: { ...model3dMetadata(stored), prompt: t("canvas.model3dTextures.resultTitle") },
                 };
                 setNodes((prev) => [...prev, resultNode]);
@@ -2751,7 +2753,7 @@ function InfiniteCanvasPage() {
             const previousFormat = node.metadata?.model3dConvertedFormat;
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined, model3dConvertedFormat: "3MF" } } : item)));
             try {
-                const source = { taskId: node.metadata?.model3dSourceTaskId, storageKey: node.metadata?.storageKey, mimeType: node.metadata?.mimeType };
+                const source = { storageKey: node.metadata?.storageKey, mimeType: node.metadata?.mimeType };
                 const input = await resolveOpInput(generationConfig, source, { signal: controller.signal });
                 const result = await requestModel3dConvert(
                     generationConfig,
@@ -3839,8 +3841,10 @@ function InfiniteCanvasPage() {
                                               ...model3dMetadata(stored, preview),
                                               prompt: effectivePrompt,
                                               ...buildModel3dGenerationMetadata(generationConfig),
-                                              // Kept so follow-up operations can chain off this task server-side.
+                                              // Kept for the operations that chain off a task id rather than
+                                              // an uploaded file; valid for Tripo's 7-day retention window.
                                               model3dSourceTaskId: result.taskId,
+                                              model3dSourceTaskAt: new Date().toISOString(),
                                               model3dTaskKind: multiview ? ("multiview" as const) : ("generate" as const),
                                           },
                                       }

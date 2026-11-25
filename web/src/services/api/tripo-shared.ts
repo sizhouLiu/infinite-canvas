@@ -20,6 +20,23 @@ export type TripoEnvelope<T> = { code?: number; data?: T | null; message?: strin
 /** Terminal task states other than success; each releases the frozen credits. */
 export const TRIPO_FAILED_STATES = ["failed", "banned", "expired", "cancelled"];
 
+/**
+ * Tripo keeps a task's models and images for 7 days. After that the task id resolves to nothing, so anything
+ * that would hand an old id back to Tripo — a follow-up operation's `input`, a converted file's signed URL —
+ * has to fall back to the copy saved locally when the task finished.
+ */
+export const TRIPO_TASK_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a task's server-side assets should still exist. An absent or unparsable timestamp counts as expired:
+ * nodes from an older build, a local import, or a locally rebuilt glb have no task of their own, and uploading
+ * the stored file always works while a dead id does not.
+ */
+export function isTripoTaskLive(createdAt: string | undefined) {
+    const time = createdAt ? Date.parse(createdAt) : Number.NaN;
+    return Number.isFinite(time) && Date.now() - time < TRIPO_TASK_RETENTION_MS;
+}
+
 export function tripoUrl(config: Pick<AiConfig, "baseUrl">, path: string) {
     const base = config.baseUrl.trim().replace(/\/+$/, "");
     const root = new RegExp(`/${TRIPO_API_VERSION}$`, "i").test(base) ? base : `${base}/${TRIPO_API_VERSION}`;

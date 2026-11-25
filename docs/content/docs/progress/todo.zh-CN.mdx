@@ -5,9 +5,11 @@ description: 当前项目后续值得处理的事项
 
 # TODO
 
-- Agent 画布操作：`add_node` 支持已启用插件的节点类型（如 `wallpaper-preview:viewer`），并支持从本机图片路径创建图片节点，供 `wallpaper-pipeline` 直接放预览节点和截图。
+- Agent 画布操作：`add_node` 支持已启用插件的节点类型（如 `wallpaper-preview:viewer`），供 `wallpaper-pipeline` 直接放预览节点。
 本文档用来记录当前项目后续比较值得处理的事项。
 
 - 本地 Agent 接入后续：按[本地 Agent 接入规划](/zh-CN/docs/progress/local-agent-integration-plan)把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。
 - Agent Skill 后续：补充网络检索安装、Skill 资源文件管理和可控的本地记忆沉淀。
 - Tripo 3D 后续：把 3D 节点作为下游生成的输入引用。
+- Tripo Studio MCP 接入：由 Canvas Agent 作为 MCP 客户端桥接远程 MCP（`https://msapi.tripo3d.ai/mcp`，OAuth 授权），只接现有 `/v3` 渠道没有的能力 —— Studio 资产库、动作生成和按幂等键找回任务。当前卡在开发机访问不到国际区。
+- 解除套用动画的 7 天限制：`/v3` 的 retarget 只收绑骨 task id，但 MCP 的 `tripo_retarget_model` 收 `source_model_id`（Studio 资产 ID），`tripo_import_model` 能把本地存的带骨骼 glb 重新变成资产。MCP 桥接落地后，画布上绑好骨的 glb 就能一直套新动作，不必重新绑骨。依赖上面的 MCP 桥接。

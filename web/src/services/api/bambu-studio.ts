@@ -1,6 +1,7 @@
 import i18n from "@/i18n";
 import { fetchAgentJson } from "@/services/api/canvas-agent";
 import { getMediaBlob } from "@/services/file-storage";
+import { isTripoTaskLive } from "@/services/api/tripo-shared";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const text = (key: string, options?: Record<string, unknown>) => i18n.t(`canvas.bambuStudio.${key}`, options);
@@ -37,8 +38,10 @@ async function resolveBambuFile(node: CanvasNodeData): Promise<BambuFile> {
     const fileName = `${title.replace(/[\\/]/g, "_").slice(0, 64) || "model"}.3mf`;
     if (!isThreeMfNode(node)) throw new Error(text("needConvert", { name: title }));
 
+    // Tripo deletes a task's assets after 7 days, so a signed URL from an older conversion is skipped in
+    // favour of the local copy saved at conversion time; otherwise Bambu Studio opens to a dead link.
     const remoteUrl = node.metadata?.model3dConvertedUrl?.trim();
-    if (remoteUrl && /^https?:\/\//i.test(remoteUrl) && THREE_MF.test(node.metadata?.model3dConvertedFormat || node.metadata?.model3dConvertedMime || "")) {
+    if (remoteUrl && /^https?:\/\//i.test(remoteUrl) && isTripoTaskLive(node.metadata?.model3dSourceTaskAt) && THREE_MF.test(node.metadata?.model3dConvertedFormat || node.metadata?.model3dConvertedMime || "")) {
         return { title, fileName, remoteUrl };
     }
 

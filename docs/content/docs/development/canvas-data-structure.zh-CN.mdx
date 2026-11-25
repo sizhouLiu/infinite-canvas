@@ -221,6 +221,14 @@ type UploadedImage = {
 - 有 `storageKey`：恢复 `coverUrl` 和 `data.dataUrl` 的可展示 URL。
 - 无 `storageKey` 且保存了 base64：写入 `image_files`，然后更新素材里的 `storageKey`。
 
+## Tripo 资产留存
+
+Tripo 的任务只保留 7 天模型和图片。生成的模型、预览图、后续操作产物和生图都在任务成功时立刻下载进本地存储，所以过期后节点照常可用；失效的是服务端任务本身。
+
+- 3D 后续操作（重新贴图、转换格式、减面、分割部件、UV、绑骨检测）一律上传本地已存模型换取 `file_token`，不再复用 task id。task id 只能省一次上传，却只在 7 天内有效，而且本地导入、分割后本地重建的部件本来就没有 task id；统一走上传是唯一始终可用的路径。
+- 套用动画和网格补全只能接上游绑骨 / 分割任务的 ID：`/v3` 的 retarget 和 mesh/complete 的 `input` 只认 task id，传 `file_token` 会被拒绝。这是接口限制，不是格式限制 —— 绑骨产物就是带骨骼的 glb（`out_format` 可选 glb 或 fbx）。这两个操作用 `model3dSourceTaskAt` 判断是否超过 7 天，超期直接提示需重新绑骨或分割，不发出必然失败的付费请求。
+- Bambu Studio 优先用未过期的 `model3dConvertedUrl`：走本地文件要把整个模型 base64 编码后交给本机 Canvas Agent 临时托管，签名地址能省掉这一步，也不依赖 Agent 连接。过期后才改用转换时保存的本地文件。
+
 ## 图片移除和清理
 
 图片不是在删除节点时立即按节点逐张删除，而是做引用清理：

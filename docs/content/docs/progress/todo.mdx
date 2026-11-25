@@ -5,7 +5,9 @@ description: Planned follow-up work
 
 # TODO
 
-- Agent canvas ops: let `add_node` create enabled plugin node types (such as `wallpaper-preview:viewer`) and create image nodes from local image paths, so `wallpaper-pipeline` can place the preview node and screenshots directly.
+- Agent canvas ops: let `add_node` create enabled plugin node types (such as `wallpaper-preview:viewer`), so `wallpaper-pipeline` can place the preview node directly.
 - Replace the Claude Code CLI adapter with a Claude Agent SDK adapter and improve the tool queue, following the [Local Agent Integration Plan](/docs/progress/local-agent-integration-plan).
 - Add Skill installation from web search, Skill resource-file management, and controlled local-memory persistence.
 - Tripo 3D follow-ups: let a 3D node act as a reference input for downstream generation.
+- Tripo Studio MCP: bridge the remote MCP (`https://msapi.tripo3d.ai/mcp`, OAuth) through Canvas Agent and expose the capabilities the existing `/v3` channel lacks — Studio asset library, motion generation, and idempotency-key task recovery. Blocked on reaching the international region from the development machine.
+- Lift the 7-day limit on applying an animation: `/v3` retarget accepts only a rig task id, but MCP `tripo_retarget_model` takes a `source_model_id` (a Studio asset), and `tripo_import_model` can turn a locally stored rigged glb back into one. Once the MCP bridge lands, a rigged glb on the canvas can keep taking new motions instead of needing a re-rig. Depends on the MCP bridge above.

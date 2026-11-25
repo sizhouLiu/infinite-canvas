@@ -42,7 +42,7 @@ npm run pipeline -- --skip-export --check
 先用 `canvas_get_state` 读取画布，新节点放在已有节点右侧并留出间距。
 
 1. 用 `canvas_create_text_node` 写一个结果摘要节点，标题「壁纸构建结果」，内容包含：成功/失败（失败时附 `error`）、各步骤名与耗时（跳过的步骤标「已跳过」）、`wallpaper` 目录、`zip` 路径、截图路径列表。
-2. 截图：当前画布工具没有“从本机路径创建图片节点”的操作（`canvas_create_attachment_nodes` 只接受对话附件，`add_node` 的 `metadata.content` 写本机路径浏览器无法读取）。因此不要创建空图片节点或写本机路径当图片地址；只在摘要里列出截图路径，并告诉用户可以把这些 PNG 拖进画布。
+2. 截图：用 `canvas_create_local_file_nodes` 传截图的绝对路径，创建真实图片节点。不要创建空图片节点，也不要把本机路径写进 `add_node` 的 `metadata.content`，浏览器读不到本机路径。
 3. 预览：
    - 预览服务：`npm run preview`（`node pipeline/serve.mjs`，端口 4173）。一个服务提供项目里所有已构建的壁纸：`http://localhost:4173/wallpapers.json` 列出 `[{ id, title, path, cameras }]`，壁纸页在 `http://localhost:4173/w/<id>/`。
    - 先检查 `http://localhost:4173/wallpapers.json` 是否可访问；不可访问时在项目根目录后台启动 `npm run preview`（会一直运行，不要等待它退出），再确认可以访问，并确认本次构建的壁纸 id（配置里的 `name`）在列表里。

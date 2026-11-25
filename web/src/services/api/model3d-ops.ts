@@ -152,12 +152,12 @@ export async function waitForModel3dOp(config: AiConfig, taskId: string, options
 }
 
 /**
- * Resolve the `input` for an operation. Tripo accepts a prior task_id, a file_token, or a URL; a task id
- * keeps the bytes server-side, so it is preferred. When the node has no usable task id (an older node, or
- * one restored from storage) the stored model is uploaded to get a file_token instead.
+ * Resolve the `input` for an operation by uploading the locally stored model for a file_token. Tripo also
+ * accepts a prior task_id, which would keep the bytes server-side, but it only resolves for 7 days — and
+ * plenty of nodes never have one (a local file import, a part rebuilt locally after a split). Uploading the
+ * stored file is the one path that always works, so it is the only path, at the cost of one upload.
  */
-export async function resolveOpInput(config: AiConfig, source: { taskId?: string; storageKey?: string; mimeType?: string }, options?: TripoRequestOptions) {
-    if (source.taskId) return source.taskId;
+export async function resolveOpInput(config: AiConfig, source: { storageKey?: string; mimeType?: string }, options?: TripoRequestOptions) {
     if (!source.storageKey) throw new Error(apiText("model3dOpSourceMissing"));
     const blob = await getMediaBlob(source.storageKey);
     if (!blob) throw new Error(apiText("model3dOpSourceMissing"));
